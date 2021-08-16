@@ -1,0 +1,1557 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Mon Nov 16 14:10:29 2020
+
+@author: Lenovo
+"""
+
+
+from scipy import signal
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.interpolate import UnivariateSpline
+
+
+def recuperation_points(fichier):
+    f=open(fichier, "r")
+    d=f.read()
+    f.close()
+    A=[]
+    for k in d :
+        A.append(str(k))
+    C=[]
+    D=[]  
+    x=str() 
+    for k in range(len(A)):
+        if A[k]==''or A[k]=='\t' or A[k]=='\n' :
+            if x!='':
+                D.append(int(x))
+                C.append(D)
+                D=[]
+                x=str()
+        else :
+            x=x+str(A[k])
+    E=[]
+    a=int(len(C)-1)
+    for k in range(0,a,3):
+        E.append([C[k][0],C[k+1][0]])    
+    return E
+  
+def tri_liste(L):
+    for k in range(len(L)-2):
+        if L[k+1]<L[k]:
+            a=L[k+1]
+            L=L[0:k+1]+L[k+2:]
+            i=0
+            while i<=k and a>L[i]:
+                i=i+1
+            L=L[0:i]+[a]+[L[i]]+L[i+1:]
+    """dernière valeur"""
+    a=L[-1]
+    L=L[:-1]
+    i=0
+    while i<len(L) and a>L[i]:
+        i=i+1
+    if i!=len(L):
+        L=L[0:i]+[a]+[L[i]]+L[i+1:]
+    else :
+        L.append(a)
+    return L
+
+def inversion(L):
+    A=[]
+    max_X=L[-1][0]
+    for k in range(len(L)):
+        A.append([max_X-L[len(L)-k-1][0],L[len(L)-k-1][1]])
+    return A
+
+def tri_coordonnees(l):
+    for k in range(len(l)-2):
+        if l[k+1][0]<l[k][0]:
+            a=l[k+1]
+            l=l[0:k+1]+l[k+2:]
+            i=0
+            while i<=k and a[0]>l[i][0]:
+                i=i+1
+            l=l[0:i]+[a]+[l[i]]+l[i+1:]
+    """dernière valeur"""
+    a=l[-1]
+    l=l[:-1]
+    i=0
+    while i<len(l) and a[0]>l[i][0]:
+        i=i+1
+    if i!=len(l):
+        l=l[0:i]+[a]+[l[i]]+l[i+1:]
+    else :
+        l.append(a)
+    """tri des valeurs, suivant leur Y, des points ayant le même X"""
+    for k in range(len(l)-1):
+        if l[k+1][0]==l[k][0]:
+            if l[k+1][1]<l[k][1]:
+                a=l[k+1]
+                l=l[0:k+1]+l[k+2:]
+                i=0
+                while a[0]>l[i][0] and i<len(l):
+                    i=i+1
+                l=l[0:i]+[a]+[l[i]]+l[i+1:]   
+    return l
+
+def purification(L,s):
+    """purification du début"""
+    i=0
+    a=len(L)-s
+    B=[]
+    while len(B)!=s and i<a :
+        for k in range (1,s+2):
+            if L[i][1]==L[i+k][1]:
+                B.append(L[i+k])
+            else:
+                B=[]
+        i=i+1
+    L=L[i+1:]
+    """purification de la fin"""   
+    i=len(L)-1
+    B=[]
+    while len(B)!=s and i>0 :
+        for k in range (0,s):
+            if L[i][1]==L[i-k][1]:
+                B.append(L[i-k])
+            else:
+                B=[]
+        i=i-1
+    L=L[:i+2]
+    return L
+
+def echelle(L,pix,milli):
+    L2=[]
+    for k in range(len(L)):
+        L2.append(L[k]*milli/pix)
+    return L2
+
+def separe_XY(L):
+    A=[]
+    B=[]
+    for k in range(len(L)):
+        A.append(L[k][0])
+        B.append(L[k][1])
+    return A,B
+
+def regroupement(liste_X,liste_Y):
+    if len(liste_X)!=len(liste_Y):
+        return print('erreur')
+    L=[]
+    for k in range(len(liste_X)):
+        L.append([liste_X[k],liste_Y[k]])
+    return L
+
+def erreur_L1L2(L_1,L_2):
+    e=[]
+    for k in range(len(L_1)):
+        e.append(L_1[k]-L_2[k])
+    return e
+
+"""renvoie les coordonnées de points sensés appartenir à un morceau de tôle côté gauche"""
+def recherche_plan_gauche(L,l,s):
+    i=0
+    while abs(L[i+l][1]-L[i][1])<=s and i<(len(L)-(l+1)):
+        i=i+1
+    if i==len(L)-(l+1):
+        return print("erreur")
+    return L[:i]
+"""renvoie les coordonnées de points sensés appartenir à un morceau de tôle côté droit"""
+def recherche_plan_droite(L,l,s):
+    i=len(L)-1
+    while abs(L[i-l][1]-L[i][1])<=s and i>l+1:
+        i=i-1
+    if i==0:
+        return print("erreur")
+    return L[i:]
+
+def moindres_carres(L):
+    n=len(L)
+    xm=0
+    ym=0
+    sxiyi=0
+    sxi2=0
+    sxi=0
+    syi=0
+    for k in range(len(L)):
+        xm=xm+L[k][0]
+        ym=ym+L[k][1]
+        sxiyi=sxiyi+L[k][0]*L[k][1]
+        sxi2=sxi2+L[k][0]*L[k][0]
+        sxi=sxi+L[k][0]
+        syi=syi+L[k][1]
+    xm=xm/n
+    ym=ym/n
+    a=(n*sxiyi-sxi*syi)/(n*sxi2-sxi*sxi)
+    b=ym-a*xm
+    SCE_yb=0
+    SCE_D=0
+    for k in range(len(L)):
+        SCE_yb=SCE_yb+(L[k][1]-ym)**2
+        SCE_D=SCE_D+(L[k][1]-(a*L[k][0]+b))**2
+    R2=1-SCE_D/SCE_yb
+    return a,b,R2
+
+def calcul_droite(liste_X,a,b):
+    L=[]
+    for k in range(len(liste_X)):
+        L.append(a*liste_X[k]+b)
+    return L
+
+def rotation(angle,liste_X, liste_Y,point): 
+    """rotation à partir du point"""
+    liste_X_tournee=[]
+    liste_Y_tournee=[]
+    X0=point[0]
+    Y0=point[1]
+    for k in range(len(liste_X)):
+        X_prime=(liste_X[k]-X0)*np.cos(angle)-(liste_Y[k]-Y0)*np.sin(angle)+X0
+        Y_prime=(liste_X[k]-X0)*np.sin(angle)+(liste_Y[k]-Y0)*np.cos(angle)+Y0
+        liste_X_tournee.append(X_prime)
+        liste_Y_tournee.append(Y_prime)
+    return liste_X_tournee,liste_Y_tournee
+
+def bissectrice_plus(a1,b1,a2,b2):
+    r=np.sqrt(a1**2+1)/np.sqrt(a2**2+1)
+    A=(a1-r*a2)/(1-r)
+    B=(b1-r*b2)/(1-r)
+    return A,B
+
+def bissectrice_moins(a1,b1,a2,b2):
+    r=np.sqrt(a1**2+1)/np.sqrt(a2**2+1)
+    A=(a1+r*a2)/(1+r)
+    B=(b1+r*b2)/(1+r)
+    return A,B
+
+def angle_minimal(angle1,angle2):
+    a1=abs(angle1)
+    a2=abs(angle2)
+    if a1>a2 :
+        return angle2
+    else :
+        return angle1
+
+def butterworth(L,c,d):
+    b, a = signal.butter(c, d)
+    filtrage = signal.filtfilt(b, a, L)
+    return filtrage
+
+def recherche_point_mini(liste_X,liste_Y):
+    m=min(liste_Y)
+    indice=0
+    for k in range(len(liste_Y)):
+        if liste_Y[k]==m:
+            indice=k
+    return [liste_X[indice],liste_Y[indice]],indice
+
+def recherche_point_largeur_gauche(point_extreme,point_fond,indice,liste_X,liste_Y,a,b,horizontale):
+    arret=0
+    for k in range(len(liste_X)):
+        if point_extreme[0]==liste_X[k] and point_extreme[1]==liste_Y[k]:
+            arret=k
+    L1=liste_X[arret-1:indice+1]
+    L2=liste_Y[arret-1:indice+1]
+    difference_y_calcules_moins_y_reels=[]
+    for k in range(len(L1)):
+        if L2[len(L1)-1-k]>horizontale and L2[len(L1)-1-k]-L2[len(L1)-k-2]<0:
+            break
+        z=abs(L2[len(L1)-1-k]-(a*L1[len(L1)-1-k]+b))
+        difference_y_calcules_moins_y_reels.append(z)
+    minimum=min(difference_y_calcules_moins_y_reels)
+    indice_minimum=difference_y_calcules_moins_y_reels.index(minimum)
+    return [L1[len(L1)-1-indice_minimum],L2[len(L1)-1-indice_minimum]],minimum
+
+def recherche_point_largeur_droite(point_fond,indice,point_extreme,liste_X,liste_Y,a,b,horizontale):
+    arret=0
+    for k in range(len(liste_X)):
+        if point_extreme[0]==liste_X[k] and point_extreme[1]==liste_Y[k]:
+            arret=k 
+    L1=liste_X[indice-1:arret+1]
+    L2=liste_Y[indice-1:arret+1]
+    difference_y_calcules_moins_y_reels=[]
+    for k in range(len(L1)):
+        if L2[k]>horizontale and L2[k+1]-L2[k]<0:
+            break
+        z=abs(L2[k]-(a*L1[k]+b))
+        difference_y_calcules_moins_y_reels.append(z)
+    minimum=min(difference_y_calcules_moins_y_reels)
+    indice_minimum=difference_y_calcules_moins_y_reels.index(minimum)
+    return [L1[indice_minimum],L2[indice_minimum]],minimum
+
+def recherche_point_largeur_droite2(point_fond,point_gauche,liste_X,liste_Y):
+    y_arret=point_gauche[0][1]
+    for k in range(len(liste_X)):
+        if liste_X[k]>point_fond[0]:
+            if liste_Y[k]>y_arret:
+                break
+    return [liste_X[k],liste_Y[k]]
+
+def cercle_moindres_carres(liste_X,liste_Y):
+    n=len(liste_X)
+    sxi=0
+    syi=0
+    sxiyi=0
+    sxi2=0
+    syi2=0
+    sxi_xi2_yi2=0
+    syi_xi2_yi2=0
+    sxi2_yi2=0
+    for k in range(len(liste_X)):
+        sxi=sxi+liste_X[k]
+        syi=syi+liste_Y[k]
+        sxiyi=sxiyi+liste_X[k]*liste_Y[k]
+        sxi2=sxi2+liste_X[k]*liste_X[k]
+        syi2=syi2+liste_Y[k]*liste_Y[k]
+        sxi_xi2_yi2=sxi_xi2_yi2+liste_X[k]*(liste_X[k]*liste_X[k]+liste_Y[k]*liste_Y[k])
+        syi_xi2_yi2=syi_xi2_yi2+liste_Y[k]*(liste_X[k]*liste_X[k]+liste_Y[k]*liste_Y[k])
+        sxi2_yi2=sxi2_yi2+liste_X[k]*liste_X[k]+liste_Y[k]*liste_Y[k]
+        
+    M=np.array([[sxi2,sxiyi,sxi],[sxiyi,syi2,syi],[sxi,syi,n]])
+    V=np.array([[sxi_xi2_yi2],[syi_xi2_yi2],[sxi2_yi2]])
+    
+    inverse_M=np.linalg.inv(M)
+    U=np.dot(inverse_M,V)
+    A=U[0]
+    B=U[1]
+    C=U[2]
+    
+    X_Centre=A/2
+    Y_Centre=B/2
+    R=np.sqrt(C+X_Centre**2+Y_Centre**2)
+    
+    ym=syi/n
+    SCE_ym=0
+    SCE_c=0
+    m=0
+    Y_c=[]
+    
+    if liste_Y[-2]>liste_Y[-1]:
+        for k in range(len(liste_X)):
+            m=m+np.sqrt((X_Centre-liste_X[k])**2+(Y_Centre-liste_Y[k])**2)-R
+            SCE_ym=SCE_ym+(ym-liste_Y[k])**2
+            Y_cercle=Y_Centre+np.sqrt(R*R-(liste_X[k]-X_Centre)**2)
+            Y_c.append(Y_cercle)
+            SCE_c=SCE_c+(liste_Y[k]-Y_cercle)**2
+    
+
+    if liste_Y[-2]<liste_Y[-1]:
+        for k in range(len(liste_X)):
+            m=m+np.sqrt((X_Centre-liste_X[k])**2+(Y_Centre-liste_Y[k])**2)-R
+            SCE_ym=SCE_ym+(ym-liste_Y[k])**2
+            Y_cercle=Y_Centre-np.sqrt(R*R-(liste_X[k]-X_Centre)**2)
+            Y_c.append(Y_cercle)
+            SCE_c=SCE_c+(liste_Y[k]-Y_cercle)**2
+    
+    SCE=1-SCE_c/SCE_ym
+    m=m/n
+    
+    return X_Centre,Y_Centre,R,Y_c,SCE,m
+
+def rang_point(liste_X,abscisse):
+    i=0
+    while liste_X[i]<abscisse:
+        i=i+1            
+    return i
+
+
+def recapitulatif_avec_coupe(fichier,pix_echX,pix_echY,mm_echX,mm_echY,seuil1,longueur1,seuil2,filtre1,filtre2,point_H1,point_H2,point_B1,point_B2):
+    
+    """récupération données obtenues"""
+    donnees_brutes=recuperation_points(fichier)
+    donnees_triees_X=tri_coordonnees(donnees_brutes)
+    donnees_coupees_extremites=purification(donnees_triees_X,seuil1)
+    XY_separes=separe_XY(donnees_coupees_extremites)
+    
+    """listes des X et des Y"""
+    X_pix=XY_separes[0]
+    Y_pix=XY_separes[1]
+    
+    """passage en mm"""
+    X=echelle(X_pix,pix_echX,mm_echX)
+    Y=echelle(Y_pix,pix_echY,mm_echY)
+    
+    """recherche des tôles"""
+    XY_regroupes=regroupement(X,Y)
+    plan_gauche=recherche_plan_gauche(XY_regroupes,longueur1,seuil2)
+    plan_droite=recherche_plan_droite(XY_regroupes,longueur1,seuil2)
+    XY_plan_gauche=separe_XY(plan_gauche)
+    XY_plan_droite=separe_XY(plan_droite)
+    X_plan_gauche=XY_plan_gauche[0]
+    Y_plan_gauche=XY_plan_gauche[1]
+    X_plan_droite=XY_plan_droite[0]
+    Y_plan_droite=XY_plan_droite[1]
+    
+    """graphe données + tôles"""
+    plt.figure('graphe toles')
+    plt.subplot(3,1,1)
+    plt.plot(X,Y)
+    plt.plot(X_plan_gauche,Y_plan_gauche,label='gauche')
+    plt.plot(X_plan_droite,Y_plan_droite,label='droite')
+    plt.xlabel('échelle en micromètres')
+    plt.ylabel('échelle en micromètres')
+    plt.show()
+    
+    """droites des moindres carrées des tôles"""
+    moindres_carres_gauche=moindres_carres(plan_gauche)
+    moindres_carres_droite=moindres_carres(plan_droite)
+    a_gauche=moindres_carres_gauche[0]
+    b_gauche=moindres_carres_gauche[1]
+    a_droite=moindres_carres_droite[0]
+    b_droite=moindres_carres_droite[1]
+    print('coefficient directeur tôle de gauche',a_gauche)
+    print('coefficient directeur tôle de droite',a_droite)
+    print("erreur moindre carres gauche :",moindres_carres_gauche[2])
+    print("erreur moindre carres droite :",moindres_carres_droite[2])
+    print()
+    Y_moindres_carres_gauche=calcul_droite(X_plan_gauche,a_gauche,b_gauche)
+    Y_moindres_carres_droite=calcul_droite(X_plan_droite,a_droite,b_droite)
+    Y_moindres_carres_gauche=calcul_droite(X_plan_gauche,a_gauche,b_gauche)
+    Y_moindres_carres_droite=calcul_droite(X_plan_droite,a_droite,b_droite)
+    plt.subplot(3,1,3)
+    plt.title('graphe droites')
+    plt.plot(X,Y)
+    plt.plot(X_plan_gauche,Y_moindres_carres_gauche,label='gauche')
+    plt.plot(X_plan_droite,Y_moindres_carres_droite,label='droite')
+    plt.xlabel('échelle en micromètres')
+    plt.ylabel('échelle en micromètres')
+    plt.show()
+    
+    """calcul des bissectrices"""
+    bissectrice1=bissectrice_plus(a_gauche,b_gauche,a_droite,b_droite)
+    bissectrice2=bissectrice_moins(a_gauche,b_gauche,a_droite,b_droite)
+    A1=bissectrice1[0]
+    A2=bissectrice2[0]
+    print("coefficient directeur bissectrice 1 :", A1)
+    print("coefficient directeur bissectrice 2 :", A2)
+    print("comparaison des angles (arctg1 puis arctg2) : ",np.arctan(A1), np.arctan(A2))
+    print()
+    
+    """rotations"""
+    """ -- symétrie -- """
+    angle_rotation_sym=(-np.arctan(angle_minimal(A1,A2)))
+    total_tourne_sym=rotation(angle_rotation_sym,X,Y,[X[0],Y[0]])
+    total_tourne_gauche_sym=rotation(angle_rotation_sym,X_plan_gauche,Y_plan_gauche,[X[0],Y[0]])
+    total_tourne_droite_sym=rotation(angle_rotation_sym,X_plan_droite,Y_plan_droite,[X[0],Y[0]])
+    regroupe_tourne_gauche_sym=regroupement(total_tourne_gauche_sym[0],total_tourne_gauche_sym[1])
+    regroupe_tourne_droite_sym=regroupement(total_tourne_droite_sym[0],total_tourne_droite_sym[1])
+    moindres_carres_tourne_gauche_sym=moindres_carres(regroupe_tourne_gauche_sym)
+    moindres_carres_tourne_droite_sym=moindres_carres(regroupe_tourne_droite_sym)
+    print("coefficient directeur gauche après rotation :",moindres_carres_tourne_gauche_sym[0])
+    print("coefficient directeur droite après rotation :",moindres_carres_tourne_droite_sym[0])
+    print("|g/d|=",abs(moindres_carres_tourne_gauche_sym[0]/moindres_carres_tourne_droite_sym[0]))
+    print()
+    """ -- gauche horizontale -- """
+    angle_rotation_gauche=(-np.arctan(a_gauche))
+    total_aligne_gauche=rotation(angle_rotation_gauche,X,Y,[X[0],Y[0]])
+    total_aligne_gauche_gauche=rotation(angle_rotation_gauche,X_plan_gauche,Y_plan_gauche,[X[0],Y[0]])
+    total_aligne_droite_gauche=rotation(angle_rotation_gauche,X_plan_droite,Y_plan_droite,[X[0],Y[0]])
+    regroupe_aligne_gauche_gauche=regroupement(total_aligne_gauche_gauche[0],total_aligne_gauche_gauche[1])
+    regroupe_aligne_droite_gauche=regroupement(total_aligne_droite_gauche[0],total_aligne_droite_gauche[1])
+    moindres_carres_aligne_gauche_gauche=moindres_carres(regroupe_aligne_gauche_gauche)
+    moindres_carres_aligne_droite_gauche=moindres_carres(regroupe_aligne_droite_gauche)
+    print("coefficient directeur gauche après alignement :",moindres_carres_aligne_gauche_gauche[0])
+    print("coefficient directeur droite après alignement :",moindres_carres_aligne_droite_gauche[0])
+    print("angle désalignement plaques (en degrés) :", np.arctan(moindres_carres_aligne_droite_gauche[0])*180/np.pi)
+    print()
+    
+    """graphes données tournées"""
+    A=[]
+    horizontale_sym=regroupe_tourne_gauche_sym[-1][1]
+    for k in range(len(total_tourne_sym[0])):
+        A.append(horizontale_sym)
+    plt.figure('graphes rotations')
+    plt.subplot(3,1,1)
+    plt.title('graphe rotation symetrie')
+    plt.plot(X,Y, label ='courbe initiale')
+    plt.plot(total_tourne_sym[0],total_tourne_sym[1],label='courbe tournée')
+    plt.plot(total_tourne_sym[0],A,label='"horizontale"')
+    plt.xlabel('échelle en micromètres')
+    plt.ylabel('échelle en micromètres')
+    plt.legend()
+    plt.show()
+    A=[]
+    horizontale_aligne_g=moindres_carres_aligne_gauche_gauche[1]
+    for k in range(len(total_aligne_gauche[0])):
+        A.append(moindres_carres_aligne_gauche_gauche[0]*total_aligne_gauche[0][k]+horizontale_aligne_g)
+    plt.subplot(3,1,3)
+    plt.title('graphe rotation alignement gauche')
+    plt.plot(X,Y, label ='courbe initiale')
+    plt.plot(total_aligne_gauche[0],total_aligne_gauche[1],label='courbe tournée')
+    plt.plot(total_aligne_gauche[0],A,label='"horizontale"')
+    plt.xlabel('échelle en micromètres')
+    plt.ylabel('échelle en micromètres')
+    plt.legend()
+    plt.show()
+    
+    """filtrage"""
+    filtrage_donnees_sym=butterworth(total_tourne_sym[1],filtre1,filtre2)
+    filtrage_donnees_aligne_gauche=butterworth(total_aligne_gauche[1],filtre1,filtre2)
+    erreur_filtrage_sym=erreur_L1L2(total_tourne_sym[1],filtrage_donnees_sym)
+    erreur_filtrage_aligne_gauche=erreur_L1L2(total_aligne_gauche[1],filtrage_donnees_aligne_gauche)
+    plt.figure('filtrage sym')
+    plt.subplot(3,1,1)
+    plt.plot(total_tourne_sym[0],total_tourne_sym[1],label='courbe initiale symétrisée')
+    plt.plot(total_tourne_sym[0],filtrage_donnees_sym,label='filtrage')
+    plt.xlabel('échelle en micromètres')
+    plt.ylabel('échelle en micromètres')
+    plt.legend()
+    plt.subplot(3,1,3)
+    plt.title("erreur=initiale-filtrage")
+    plt.plot(total_tourne_sym[0],erreur_filtrage_sym)
+    plt.xlabel('échelle en micromètres')
+    plt.ylabel('échelle en micromètres')
+    plt.show()
+    plt.figure('filtrage alignement gauche')
+    plt.subplot(3,1,1)
+    plt.plot(total_aligne_gauche[0],total_aligne_gauche[1],label='courbe initiale alignée gauche')
+    plt.plot(total_aligne_gauche[0],filtrage_donnees_aligne_gauche,label='filtrage')
+    plt.xlabel('échelle en micromètres')
+    plt.ylabel('échelle en micromètres')
+    plt.legend()
+    plt.subplot(3,1,3)
+    plt.title("erreur=initiale-filtrage")
+    plt.plot(total_aligne_gauche[0],erreur_filtrage_aligne_gauche)
+    plt.xlabel('échelle en micromètres')
+    plt.ylabel('échelle en micromètres')
+    plt.show()
+    
+    """recherche point du fond"""
+    """ ___---___ symétrie ___---___ """
+    fond_caniveau_sym=recherche_point_mini(total_tourne_sym[0],total_tourne_sym[1])
+    fond_caniveau_filtre_sym=recherche_point_mini(total_tourne_sym[0],filtrage_donnees_sym)
+    print("profondeur symétrie",abs(regroupe_tourne_gauche_sym[-1][1]-fond_caniveau_filtre_sym[0][1]),"micromètres")
+    """ ___---___ alignement ___---___ """
+    fond_caniveau_aligne_gauche=recherche_point_mini(total_aligne_gauche[0],total_aligne_gauche[1])
+    fond_caniveau_filtre_aligne_gauche=recherche_point_mini(total_aligne_gauche[0],filtrage_donnees_aligne_gauche)
+    print("profondeur alignement à gauche",abs(moindres_carres_aligne_gauche_gauche[0]*fond_caniveau_filtre_aligne_gauche[0][0]-fond_caniveau_filtre_aligne_gauche[0][1]+moindres_carres_aligne_gauche_gauche[1])/np.sqrt(1+moindres_carres_aligne_gauche_gauche[0]**2),"micromètres")
+    print()
+    
+    """calcul de la largeur"""
+    """ ___---___ largeur si symétrie ___---___ """
+    P_sym=recherche_point_largeur_gauche(regroupe_tourne_gauche_sym[-1],fond_caniveau_filtre_sym[0],fond_caniveau_filtre_sym[1],total_tourne_sym[0],total_tourne_sym[1],moindres_carres_tourne_gauche_sym[0],moindres_carres_tourne_gauche_sym[1],horizontale_sym)
+    P_prime_sym=recherche_point_largeur_droite2(fond_caniveau_filtre_sym[0],P_sym,total_tourne_sym[0],total_tourne_sym[1])
+    print("point largeur gauche, symétrie",P_sym)
+    print("point largeur droite, symétrie",P_prime_sym)
+    print("largeur caniveau symétrie =", np.sqrt((P_sym[0][0]-P_prime_sym[0])**2+(P_sym[0][1]-P_prime_sym[1])**2),"micromètres")
+    """ ___---___ largeur si alignement à gauche ___---___ """
+    P_gauche=recherche_point_largeur_gauche(regroupe_aligne_gauche_gauche[-1],fond_caniveau_filtre_aligne_gauche[0],fond_caniveau_filtre_aligne_gauche[1],total_aligne_gauche[0],total_aligne_gauche[1],moindres_carres_aligne_gauche_gauche[0],moindres_carres_aligne_gauche_gauche[1],horizontale_aligne_g)
+    P_prime_gauche=recherche_point_largeur_droite2(fond_caniveau_filtre_aligne_gauche[0],P_gauche,total_aligne_gauche[0],total_aligne_gauche[1])
+    print("point largeur gauche, alignement gauche :",P_gauche)
+    print("point largeur droite, alignement gauche :",P_prime_gauche)
+    print("largeur caniveau alignement gauche =", np.sqrt((P_gauche[0][0]-P_prime_gauche[0])**2+(P_gauche[0][1]-P_prime_gauche[1])**2),"micromètres")
+    print()
+    
+    """calcul du rayon de courbure haut et bas SYM"""    
+    i1_sym=rang_point(total_tourne_sym[0],point_H1)
+    j1_sym=rang_point(total_tourne_sym[0],point_H2)
+    CERCLE1_sym=cercle_moindres_carres(total_tourne_sym[0][i1_sym:j1_sym],filtrage_donnees_sym[i1_sym:j1_sym])
+    print("cercle du haut, symétrie, coordonnées du centre (en microns) :",CERCLE1_sym[0][0],CERCLE1_sym[1][0])
+    print("cercle du haut, symétrie, rayon de courbure (en microns) :",CERCLE1_sym[2][0])
+    print("cercle du haut, symétrie, somme des carrées des écarts des y au y moyen/somme des carrées des écarts des y aux y calculés :",CERCLE1_sym[4][0])
+    print("cercle du haut, symétrie, moyenne des écarts au cercle des moindres carrés, en microns :", CERCLE1_sym[5][0])
+    print()
+    
+    i2_sym=rang_point(total_tourne_sym[0],point_B1)
+    j2_sym=rang_point(total_tourne_sym[0],point_B2)
+    CERCLE2_sym=cercle_moindres_carres(total_tourne_sym[0][i2_sym:j2_sym],filtrage_donnees_sym[i2_sym:j2_sym])
+    print("cercle du bas, symétrie, coordonnées du centre (en microns) :",CERCLE2_sym[0][0],CERCLE2_sym[1][0])
+    print("cercle du bas, symétrie, rayon de courbure (en microns) :",CERCLE2_sym[2][0])
+    print("cercle du bas, symétrie, somme des carrées des écarts des y au y moyen/somme des carrées des écarts des y aux y calculés :",CERCLE2_sym[4][0])
+    print("cercle du bas, symétrie, moyenne des écarts au cercle des moindres carrés, en microns :", CERCLE2_sym[5][0])
+    print()
+    
+    """calcul du rayon de courbure haut et bas ALIGNEMENT GAUCHE"""    
+    i1_alig=rang_point(total_aligne_gauche[0],point_H1)
+    j1_alig=rang_point(total_aligne_gauche[0],point_H2)
+    CERCLE1_aligne_g=cercle_moindres_carres(total_aligne_gauche[0][i1_alig:j1_alig],filtrage_donnees_aligne_gauche[i1_alig:j1_alig])
+    print("cercle du haut, alignement gauche, coordonnées du centre (en microns) :",CERCLE1_aligne_g[0][0],CERCLE1_aligne_g[1][0])
+    print("cercle du haut, alignement gauche, rayon de courbure (en microns) :",CERCLE1_aligne_g[2][0])
+    print("cercle du haut, alignement gauche, somme des carrées des écarts des y au y moyen/somme des carrées des écarts des y aux y calculés :",CERCLE1_aligne_g[4][0])
+    print("cercle du haut, alignement gauche, moyenne des écarts au cercle des moindres carrés, en microns :", CERCLE1_aligne_g[5][0])
+    print()
+    
+    i2_alig=rang_point(total_aligne_gauche[0],point_B1)
+    j2_alig=rang_point(total_aligne_gauche[0],point_B2)
+    CERCLE2_aligne_g=cercle_moindres_carres(total_aligne_gauche[0][i2_alig:j2_alig],filtrage_donnees_aligne_gauche[i2_alig:j2_alig])
+    print("cercle du bas, alignement gauche, coordonnées du centre (en microns) :",CERCLE2_aligne_g[0][0],CERCLE2_aligne_g[1][0])
+    print("cercle du bas, alignement gauche, rayon de courbure (en microns) :",CERCLE2_aligne_g[2][0])
+    print("cercle du bas, alignement gauche, somme des carrées des écarts des y au y moyen/somme des carrées des écarts des y aux y calculés :",CERCLE2_aligne_g[4][0])
+    print("cercle du bas, alignement gauche, moyenne des écarts au cercle des moindres carrés, en microns :", CERCLE2_aligne_g[5][0])
+
+    plt.figure('cercles')
+    plt.subplot(3,1,1)
+    plt.title('symétrie')
+    plt.plot(total_tourne_sym[0],filtrage_donnees_sym,label="donnees filtrees")
+    plt.plot(total_tourne_sym[0],[horizontale_sym for k in range(len(total_tourne_sym[0]))],label='horizontale')
+    plt.plot(total_tourne_sym[0][i1_sym:j1_sym],filtrage_donnees_sym[i1_sym:j1_sym],label='points cercle haut')
+    plt.plot(total_tourne_sym[0][i1_sym:j1_sym],CERCLE1_sym[3],label='cercle haut')
+    plt.plot(total_tourne_sym[0][i2_sym:j2_sym],filtrage_donnees_sym[i2_sym:j2_sym],label='points cercle bas')
+    plt.plot(total_tourne_sym[0][i2_sym:j2_sym],CERCLE2_sym[3],label='cercle bas')
+    plt.xlabel('échelle en micromètres')
+    plt.ylabel('échelle en micromètres')
+    plt.legend()
+    plt.subplot(3,1,3)
+    plt.title('cercle bas alignement gauche')
+    plt.plot(total_aligne_gauche[0],filtrage_donnees_aligne_gauche,label="donnees filtrees")
+    plt.plot(total_aligne_gauche[0],[horizontale_aligne_g for k in range(len(total_aligne_gauche[0]))],label='horizontale')
+    plt.plot(total_aligne_gauche[0][i1_alig:j1_alig],filtrage_donnees_aligne_gauche[i1_alig:j1_alig],label='points cercle haut')
+    plt.plot(total_aligne_gauche[0][i1_alig:j1_alig],CERCLE1_aligne_g[3],label='cercle haut')
+    plt.plot(total_aligne_gauche[0][i2_alig:j2_alig],filtrage_donnees_aligne_gauche[i2_alig:j2_alig],label='points cercle bas')
+    plt.plot(total_aligne_gauche[0][i2_alig:j2_alig],CERCLE2_aligne_g[3],label='cercle bas')
+    plt.xlabel('échelle en micromètres')
+    plt.ylabel('échelle en micromètres')
+    plt.legend()
+    plt.show()
+    return
+
+def recapitulatif_sans_coupe(fichier,pix_echX,pix_echY,mm_echX,mm_echY,longueur1,seuil,filtre1,filtre2,point_H1,point_H2,point_B1,point_B2):
+    
+    """récupération données obtenues"""
+    donnees_brutes=recuperation_points(fichier)
+    donnees_triees_X=tri_coordonnees(donnees_brutes)
+    XY_separes=separe_XY(donnees_triees_X)
+    
+    """listes des X et des Y"""
+    X_pix=XY_separes[0]
+    Y_pix=XY_separes[1]
+    
+    """passage en mm"""
+    X=echelle(X_pix,pix_echX,mm_echX)
+    Y=echelle(Y_pix,pix_echY,mm_echY)
+    
+    """recherche tôles"""
+    XY_regroupes=regroupement(X,Y)
+    plan_gauche=recherche_plan_gauche(XY_regroupes,longueur1,seuil)
+    plan_droite=recherche_plan_droite(XY_regroupes,longueur1,seuil)
+    XY_plan_gauche=separe_XY(plan_gauche)
+    XY_plan_droite=separe_XY(plan_droite)
+    X_plan_gauche=XY_plan_gauche[0]
+    Y_plan_gauche=XY_plan_gauche[1]
+    X_plan_droite=XY_plan_droite[0]
+    Y_plan_droite=XY_plan_droite[1]
+    
+    """graphe données + tôles"""
+    plt.figure('graphes toles')
+    plt.subplot(3,1,1)
+    plt.plot(X,Y)
+    plt.plot(X_plan_gauche,Y_plan_gauche,label='gauche')
+    plt.plot(X_plan_droite,Y_plan_droite,label='droite')
+    plt.xlabel('échelle en micromètres')
+    plt.ylabel('échelle en micromètres')
+    plt.show()
+    
+    """droites des moindres carrées des tôles"""
+    moindres_carres_gauche=moindres_carres(plan_gauche)
+    moindres_carres_droite=moindres_carres(plan_droite)
+    a_gauche=moindres_carres_gauche[0]
+    b_gauche=moindres_carres_gauche[1]
+    a_droite=moindres_carres_droite[0]
+    b_droite=moindres_carres_droite[1]
+    print('coefficient directeur tôle de gauche',a_gauche)
+    print('coefficient directeur tôle de droite',a_droite)
+    print("erreur moindre carres gauche :",moindres_carres_gauche[2])
+    print("erreur moindre carres droite :",moindres_carres_droite[2])
+    print()
+    Y_moindres_carres_gauche=calcul_droite(X_plan_gauche,a_gauche,b_gauche)
+    Y_moindres_carres_droite=calcul_droite(X_plan_droite,a_droite,b_droite)
+    plt.subplot(3,1,3)
+    plt.title('graphe droites')
+    plt.plot(X,Y)
+    plt.plot(X_plan_gauche,Y_moindres_carres_gauche,label='gauche')
+    plt.plot(X_plan_droite,Y_moindres_carres_droite,label='droite')
+    plt.xlabel('échelle en micromètres')
+    plt.ylabel('échelle en micromètres')
+    plt.show()
+    
+    """calcul des bissectrices"""
+    bissectrice1=bissectrice_plus(a_gauche,b_gauche,a_droite,b_droite)
+    bissectrice2=bissectrice_moins(a_gauche,b_gauche,a_droite,b_droite)
+    A1=bissectrice1[0]
+    A2=bissectrice2[0]
+    print("coefficient directeur bissectrice 1 :", A1)
+    print("coefficient directeur bissectrice 2 :", A2)
+    print("comparaison des angles (arctg1 puis arctg2) : ",np.arctan(A1), np.arctan(A2))
+    print()
+    
+    """rotations"""
+    """ -- symétrie -- """
+    angle_rotation_sym=(-np.arctan(angle_minimal(A1,A2)))
+    total_tourne_sym=rotation(angle_rotation_sym,X,Y,[X[0],Y[0]])
+    total_tourne_gauche_sym=rotation(angle_rotation_sym,X_plan_gauche,Y_plan_gauche,[X[0],Y[0]])
+    total_tourne_droite_sym=rotation(angle_rotation_sym,X_plan_droite,Y_plan_droite,[X[0],Y[0]])
+    regroupe_tourne_gauche_sym=regroupement(total_tourne_gauche_sym[0],total_tourne_gauche_sym[1])
+    regroupe_tourne_droite_sym=regroupement(total_tourne_droite_sym[0],total_tourne_droite_sym[1])
+    moindres_carres_tourne_gauche_sym=moindres_carres(regroupe_tourne_gauche_sym)
+    moindres_carres_tourne_droite_sym=moindres_carres(regroupe_tourne_droite_sym)
+    print("coefficient directeur gauche après rotation :",moindres_carres_tourne_gauche_sym[0])
+    print("coefficient directeur droite après rotation :",moindres_carres_tourne_droite_sym[0])
+    print("|g/d|=",abs(moindres_carres_tourne_gauche_sym[0]/moindres_carres_tourne_droite_sym[0]))
+    print()
+    """ -- gauche horizontale -- """
+    angle_rotation_gauche=(-np.arctan(a_gauche))
+    total_aligne_gauche=rotation(angle_rotation_gauche,X,Y,[X[0],Y[0]])
+    total_aligne_gauche_gauche=rotation(angle_rotation_gauche,X_plan_gauche,Y_plan_gauche,[X[0],Y[0]])
+    total_aligne_droite_gauche=rotation(angle_rotation_gauche,X_plan_droite,Y_plan_droite,[X[0],Y[0]])
+    regroupe_aligne_gauche_gauche=regroupement(total_aligne_gauche_gauche[0],total_aligne_gauche_gauche[1])
+    regroupe_aligne_droite_gauche=regroupement(total_aligne_droite_gauche[0],total_aligne_droite_gauche[1])
+    moindres_carres_aligne_gauche_gauche=moindres_carres(regroupe_aligne_gauche_gauche)
+    moindres_carres_aligne_droite_gauche=moindres_carres(regroupe_aligne_droite_gauche)
+    print("coefficient directeur gauche après alignement :",moindres_carres_aligne_gauche_gauche[0])
+    print("coefficient directeur droite après alignement :",moindres_carres_aligne_droite_gauche[0])
+    print("angle désalignement plaques (en degrés) :", np.arctan(moindres_carres_aligne_droite_gauche[0])*180/np.pi)
+    print()
+    
+    """graphes données tournées"""
+    A=[]
+    horizontale_sym=regroupe_tourne_gauche_sym[-1][1]
+    for k in range(len(total_tourne_sym[0])):
+        A.append(horizontale_sym)
+    plt.figure('graphes rotations')
+    plt.subplot(3,1,1)
+    plt.title('graphe rotation symetrie')
+    plt.plot(X,Y, label ='courbe initiale')
+    plt.plot(total_tourne_sym[0],total_tourne_sym[1],label='courbe tournée')
+    plt.plot(total_tourne_sym[0],A,label='"horizontale"')
+    plt.xlabel('échelle en micromètres')
+    plt.ylabel('échelle en micromètres')
+    plt.legend()
+    plt.show()
+    A=[]
+    horizontale_aligne_g=moindres_carres_aligne_gauche_gauche[1]
+    for k in range(len(total_aligne_gauche[0])):
+        A.append(moindres_carres_aligne_gauche_gauche[0]*total_aligne_gauche[0][k]+horizontale_aligne_g)
+    plt.subplot(3,1,3)
+    plt.title('graphe rotation alignement gauche')
+    plt.plot(X,Y, label ='courbe initiale')
+    plt.plot(total_aligne_gauche[0],total_aligne_gauche[1],label='courbe tournée')
+    plt.plot(total_aligne_gauche[0],A,label='"horizontale"')
+    plt.xlabel('échelle en micromètres')
+    plt.ylabel('échelle en micromètres')
+    plt.legend()
+    plt.show()
+    
+    """filtrage"""
+    filtrage_donnees_sym=butterworth(total_tourne_sym[1],filtre1,filtre2)
+    filtrage_donnees_aligne_gauche=butterworth(total_aligne_gauche[1],filtre1,filtre2)
+    erreur_filtrage_sym=erreur_L1L2(total_tourne_sym[1],filtrage_donnees_sym)
+    erreur_filtrage_aligne_gauche=erreur_L1L2(total_aligne_gauche[1],filtrage_donnees_aligne_gauche)
+    plt.figure('filtrage sym')
+    plt.subplot(3,1,1)
+    plt.plot(total_tourne_sym[0],total_tourne_sym[1],label='courbe initiale symétrisée')
+    plt.plot(total_tourne_sym[0],filtrage_donnees_sym,label='filtrage')
+    plt.xlabel('échelle en micromètres')
+    plt.ylabel('échelle en micromètres')
+    plt.legend()
+    plt.subplot(3,1,3)
+    plt.title("erreur=initiale-filtrage")
+    plt.plot(total_tourne_sym[0],erreur_filtrage_sym)
+    plt.xlabel('échelle en micromètres')
+    plt.ylabel('échelle en micromètres')
+    plt.show()
+    plt.figure('filtrage alignement gauche')
+    plt.subplot(3,1,1)
+    plt.plot(total_aligne_gauche[0],total_aligne_gauche[1],label='courbe initiale alignée gauche')
+    plt.plot(total_aligne_gauche[0],filtrage_donnees_aligne_gauche,label='filtrage')
+    plt.xlabel('échelle en micromètres')
+    plt.ylabel('échelle en micromètres')
+    plt.legend()
+    plt.subplot(3,1,3)
+    plt.title("erreur=initiale-filtrage")
+    plt.plot(total_aligne_gauche[0],erreur_filtrage_aligne_gauche)
+    plt.xlabel('échelle en micromètres')
+    plt.ylabel('échelle en micromètres')
+    plt.show()
+    
+    """recherche point du fond"""
+    """ ___---___ symétrie ___---___ """
+    fond_caniveau_sym=recherche_point_mini(total_tourne_sym[0],total_tourne_sym[1])
+    fond_caniveau_filtre_sym=recherche_point_mini(total_tourne_sym[0],filtrage_donnees_sym)
+    print("profondeur symétrie",abs(regroupe_tourne_gauche_sym[-1][1]-fond_caniveau_filtre_sym[0][1]),"micromètres")
+    """ ___---___ alignement ___---___ """
+    fond_caniveau_aligne_gauche=recherche_point_mini(total_aligne_gauche[0],total_aligne_gauche[1])
+    fond_caniveau_filtre_aligne_gauche=recherche_point_mini(total_aligne_gauche[0],filtrage_donnees_aligne_gauche)
+    print("profondeur alignement à gauche",abs(moindres_carres_aligne_gauche_gauche[0]*fond_caniveau_filtre_aligne_gauche[0][0]-fond_caniveau_filtre_aligne_gauche[0][1]+moindres_carres_aligne_gauche_gauche[1])/np.sqrt(1+moindres_carres_aligne_gauche_gauche[0]**2),"micromètres")
+    print()
+    
+    """calcul de la largeur"""
+    """ ___---___ largeur si symétrie ___---___ """
+    P_sym=recherche_point_largeur_gauche(regroupe_tourne_gauche_sym[-1],fond_caniveau_filtre_sym[0],fond_caniveau_filtre_sym[1],total_tourne_sym[0],total_tourne_sym[1],moindres_carres_tourne_gauche_sym[0],moindres_carres_tourne_gauche_sym[1],horizontale_sym)
+    P_prime_sym=recherche_point_largeur_droite2(fond_caniveau_filtre_sym[0],P_sym,total_tourne_sym[0],total_tourne_sym[1])
+    print("point largeur gauche, symétrie",P_sym)
+    print("point largeur droite, symétrie",P_prime_sym)
+    print("largeur caniveau symétrie =", np.sqrt((P_sym[0][0]-P_prime_sym[0])**2+(P_sym[0][1]-P_prime_sym[1])**2),"micromètres")
+    """ ___---___ largeur si alignement à gauche ___---___ """
+    P_gauche=recherche_point_largeur_gauche(regroupe_aligne_gauche_gauche[-1],fond_caniveau_filtre_aligne_gauche[0],fond_caniveau_filtre_aligne_gauche[1],total_aligne_gauche[0],total_aligne_gauche[1],moindres_carres_aligne_gauche_gauche[0],moindres_carres_aligne_gauche_gauche[1],horizontale_aligne_g)
+    P_prime_gauche=recherche_point_largeur_droite2(fond_caniveau_filtre_aligne_gauche[0],P_gauche,total_aligne_gauche[0],total_aligne_gauche[1])
+    print("point largeur gauche, alignement gauche :",P_gauche)
+    print("point largeur droite, alignement gauche :",P_prime_gauche)
+    print("largeur caniveau alignement gauche =", np.sqrt((P_gauche[0][0]-P_prime_gauche[0])**2+(P_gauche[0][1]-P_prime_gauche[1])**2),"micromètres")
+    print()
+    
+    """calcul du rayon de courbure haut et bas SYM"""    
+    i1_sym=rang_point(total_tourne_sym[0],point_H1)
+    j1_sym=rang_point(total_tourne_sym[0],point_H2)
+    CERCLE1_sym=cercle_moindres_carres(total_tourne_sym[0][i1_sym:j1_sym],filtrage_donnees_sym[i1_sym:j1_sym])
+    print("cercle du haut, symétrie, coordonnées du centre (en microns) :",CERCLE1_sym[0][0],CERCLE1_sym[1][0])
+    print("cercle du haut, symétrie, rayon de courbure (en microns) :",CERCLE1_sym[2][0])
+    print("cercle du haut, symétrie, somme des carrées des écarts des y au y moyen/somme des carrées des écarts des y aux y calculés :",CERCLE1_sym[4][0])
+    print("cercle du haut, symétrie, moyenne des écarts au cercle des moindres carrés, en microns :", CERCLE1_sym[5][0])
+    print()
+    
+    i2_sym=rang_point(total_tourne_sym[0],point_B1)
+    j2_sym=rang_point(total_tourne_sym[0],point_B2)
+    CERCLE2_sym=cercle_moindres_carres(total_tourne_sym[0][i2_sym:j2_sym],filtrage_donnees_sym[i2_sym:j2_sym])
+    print("cercle du bas, symétrie, coordonnées du centre (en microns) :",CERCLE2_sym[0][0],CERCLE2_sym[1][0])
+    print("cercle du bas, symétrie, rayon de courbure (en microns) :",CERCLE2_sym[2][0])
+    print("cercle du bas, symétrie, somme des carrées des écarts des y au y moyen/somme des carrées des écarts des y aux y calculés :",CERCLE2_sym[4][0])
+    print("cercle du bas, symétrie, moyenne des écarts au cercle des moindres carrés, en microns :", CERCLE2_sym[5][0])
+    print()
+    
+    """calcul du rayon de courbure haut et bas ALIGNEMENT GAUCHE"""    
+    i1_alig=rang_point(total_aligne_gauche[0],point_H1)
+    j1_alig=rang_point(total_aligne_gauche[0],point_H2)
+    CERCLE1_aligne_g=cercle_moindres_carres(total_aligne_gauche[0][i1_alig:j1_alig],filtrage_donnees_aligne_gauche[i1_alig:j1_alig])
+    print("cercle du haut, alignement gauche, coordonnées du centre (en microns) :",CERCLE1_aligne_g[0][0],CERCLE1_aligne_g[1][0])
+    print("cercle du haut, alignement gauche, rayon de courbure (en microns) :",CERCLE1_aligne_g[2][0])
+    print("cercle du haut, alignement gauche, somme des carrées des écarts des y au y moyen/somme des carrées des écarts des y aux y calculés :",CERCLE1_aligne_g[4][0])
+    print("cercle du haut, alignement gauche, moyenne des écarts au cercle des moindres carrés, en microns :", CERCLE1_aligne_g[5][0])
+    print()
+    
+    i2_alig=rang_point(total_aligne_gauche[0],point_B1)
+    j2_alig=rang_point(total_aligne_gauche[0],point_B2)
+    CERCLE2_aligne_g=cercle_moindres_carres(total_aligne_gauche[0][i2_alig:j2_alig],filtrage_donnees_aligne_gauche[i2_alig:j2_alig])
+    print("cercle du bas, alignement gauche, coordonnées du centre (en microns) :",CERCLE2_aligne_g[0][0],CERCLE2_aligne_g[1][0])
+    print("cercle du bas, alignement gauche, rayon de courbure (en microns) :",CERCLE2_aligne_g[2][0])
+    print("cercle du bas, alignement gauche, somme des carrées des écarts des y au y moyen/somme des carrées des écarts des y aux y calculés :",CERCLE2_aligne_g[4][0])
+    print("cercle du bas, alignement gauche, moyenne des écarts au cercle des moindres carrés, en microns :", CERCLE2_aligne_g[5][0])
+
+    plt.figure('cercles')
+    plt.subplot(3,1,1)
+    plt.title('symétrie')
+    plt.plot(total_tourne_sym[0],filtrage_donnees_sym,label="donnees filtrees")
+    plt.plot(total_tourne_sym[0],[horizontale_sym for k in range(len(total_tourne_sym[0]))],label='horizontale')
+    plt.plot(total_tourne_sym[0][i1_sym:j1_sym],filtrage_donnees_sym[i1_sym:j1_sym],label='points cercle haut')
+    plt.plot(total_tourne_sym[0][i1_sym:j1_sym],CERCLE1_sym[3],label='cercle haut')
+    plt.plot(total_tourne_sym[0][i2_sym:j2_sym],filtrage_donnees_sym[i2_sym:j2_sym],label='points cercle bas')
+    plt.plot(total_tourne_sym[0][i2_sym:j2_sym],CERCLE2_sym[3],label='cercle bas')
+    plt.xlabel('échelle en micromètres')
+    plt.ylabel('échelle en micromètres')
+    plt.legend()
+    plt.subplot(3,1,3)
+    plt.title('cercle bas alignement gauche')
+    plt.plot(total_aligne_gauche[0],filtrage_donnees_aligne_gauche,label="donnees filtrees")
+    plt.plot(total_aligne_gauche[0],[horizontale_aligne_g for k in range(len(total_aligne_gauche[0]))],label='horizontale')
+    plt.plot(total_aligne_gauche[0][i1_alig:j1_alig],filtrage_donnees_aligne_gauche[i1_alig:j1_alig],label='points cercle haut')
+    plt.plot(total_aligne_gauche[0][i1_alig:j1_alig],CERCLE1_aligne_g[3],label='cercle haut')
+    plt.plot(total_aligne_gauche[0][i2_alig:j2_alig],filtrage_donnees_aligne_gauche[i2_alig:j2_alig],label='points cercle bas')
+    plt.plot(total_aligne_gauche[0][i2_alig:j2_alig],CERCLE2_aligne_g[3],label='cercle bas')
+    plt.xlabel('échelle en micromètres')
+    plt.ylabel('échelle en micromètres')
+    plt.legend()
+    plt.show()
+    return
+
+def recapitulatif_Bspline(fichier,longueurg,seuilg,longueurd,seuild,point_H1,point_H2,point_B1,point_B2):
+    
+    """récupération données obtenues"""
+    donnees_brutes=recuperation_points(fichier)    
+    donnees_triees_X=tri_coordonnees(donnees_brutes)
+    XY_separes=separe_XY(donnees_triees_X)
+    X=XY_separes[0]
+    Y=XY_separes[1]
+
+    """B-spline"""
+    Y_spl = UnivariateSpline(X,Y,k=3)
+    X_range = np.linspace(X[0],X[-1],10000)
+    Y_range = Y_spl(X_range)
+    print(X_range)
+    print(Y_range)
+    plt.figure('graphe donnees + splines')
+    plt.subplot(3,1,2)
+    plt.plot(X,Y,'+',label='donnees')
+    plt.plot(X_range,Y_range)
+    plt.legend()
+    plt.show()
+    
+    """recherche tôles"""        
+    XY_regroupes=regroupement(X_range,Y_range)
+    plan_gauche=recherche_plan_gauche(XY_regroupes,longueurg,seuilg)
+    plan_droite=recherche_plan_droite(XY_regroupes,longueurd,seuild)
+    XY_plan_gauche=separe_XY(plan_gauche)
+    XY_plan_droite=separe_XY(plan_droite)
+    X_plan_gauche=XY_plan_gauche[0]
+    Y_plan_gauche=XY_plan_gauche[1]
+    X_plan_droite=XY_plan_droite[0]
+    Y_plan_droite=XY_plan_droite[1]
+    
+    """graphe données + tôles"""
+    
+    plt.figure('graphes toles')
+    plt.subplot(3,1,1)
+    plt.plot(X_range,Y_range)
+    plt.plot(X_plan_gauche,Y_plan_gauche,label='gauche')
+    plt.plot(X_plan_droite,Y_plan_droite,label='droite')
+    plt.xlabel('échelle en micromètres')
+    plt.ylabel('échelle en micromètres')
+    plt.show()
+    
+    """droites des moindres carrées des tôles"""
+    moindres_carres_gauche=moindres_carres(plan_gauche)
+    moindres_carres_droite=moindres_carres(plan_droite)
+    a_gauche=moindres_carres_gauche[0]
+    b_gauche=moindres_carres_gauche[1]
+    a_droite=moindres_carres_droite[0]
+    b_droite=moindres_carres_droite[1]
+    print('coefficient directeur tôle de gauche',a_gauche)
+    print('coefficient directeur tôle de droite',a_droite)
+    print("erreur moindre carres gauche :",moindres_carres_gauche[2])
+    print("erreur moindre carres droite :",moindres_carres_droite[2])
+    print()
+    Y_moindres_carres_gauche=calcul_droite(X_plan_gauche,a_gauche,b_gauche)
+    Y_moindres_carres_droite=calcul_droite(X_plan_droite,a_droite,b_droite)
+    plt.subplot(3,1,3)
+    plt.title('graphe droites')
+    plt.plot(X_range,Y_range)
+    plt.plot(X_plan_gauche,Y_moindres_carres_gauche,label='gauche')
+    plt.plot(X_plan_droite,Y_moindres_carres_droite,label='droite')
+    plt.xlabel('échelle en micromètres')
+    plt.ylabel('échelle en micromètres')
+    plt.show()
+    
+    """calcul des bissectrices"""
+    bissectrice1=bissectrice_plus(a_gauche,b_gauche,a_droite,b_droite)
+    bissectrice2=bissectrice_moins(a_gauche,b_gauche,a_droite,b_droite)
+    A1=bissectrice1[0]
+    A2=bissectrice2[0]
+    print("coefficient directeur bissectrice 1 :", A1)
+    print("coefficient directeur bissectrice 2 :", A2)
+    print("comparaison des angles (arctg1 puis arctg2) : ",np.arctan(A1), np.arctan(A2))
+    print()
+    
+    """rotations"""
+    """ -- symétrie -- """
+    angle_rotation_sym=(-np.arctan(angle_minimal(A1,A2)))
+    total_tourne_sym=rotation(angle_rotation_sym,X_range,Y_range,[X[0],Y[0]])
+    total_tourne_gauche_sym=rotation(angle_rotation_sym,X_plan_gauche,Y_plan_gauche,[X[0],Y[0]])
+    total_tourne_droite_sym=rotation(angle_rotation_sym,X_plan_droite,Y_plan_droite,[X[0],Y[0]])
+    regroupe_tourne_gauche_sym=regroupement(total_tourne_gauche_sym[0],total_tourne_gauche_sym[1])
+    regroupe_tourne_droite_sym=regroupement(total_tourne_droite_sym[0],total_tourne_droite_sym[1])
+    moindres_carres_tourne_gauche_sym=moindres_carres(regroupe_tourne_gauche_sym)
+    moindres_carres_tourne_droite_sym=moindres_carres(regroupe_tourne_droite_sym)
+    print("coefficient directeur gauche après rotation :",moindres_carres_tourne_gauche_sym[0])
+    print("coefficient directeur droite après rotation :",moindres_carres_tourne_droite_sym[0])
+    print("|g/d|=",abs(moindres_carres_tourne_gauche_sym[0]/moindres_carres_tourne_droite_sym[0]))
+    print()
+    """ -- gauche horizontale -- """
+    angle_rotation_gauche=(-np.arctan(a_gauche))
+    total_aligne_gauche=rotation(angle_rotation_gauche,X_range,Y_range,[X[0],Y[0]])
+    total_aligne_gauche_gauche=rotation(angle_rotation_gauche,X_plan_gauche,Y_plan_gauche,[X[0],Y[0]])
+    total_aligne_droite_gauche=rotation(angle_rotation_gauche,X_plan_droite,Y_plan_droite,[X[0],Y[0]])
+    regroupe_aligne_gauche_gauche=regroupement(total_aligne_gauche_gauche[0],total_aligne_gauche_gauche[1])
+    regroupe_aligne_droite_gauche=regroupement(total_aligne_droite_gauche[0],total_aligne_droite_gauche[1])
+    moindres_carres_aligne_gauche_gauche=moindres_carres(regroupe_aligne_gauche_gauche)
+    moindres_carres_aligne_droite_gauche=moindres_carres(regroupe_aligne_droite_gauche)
+    print("coefficient directeur gauche après alignement :",moindres_carres_aligne_gauche_gauche[0])
+    print("coefficient directeur droite après alignement :",moindres_carres_aligne_droite_gauche[0])
+    print("angle désalignement plaques (en degrés) :", np.arctan(moindres_carres_aligne_droite_gauche[0])*180/np.pi)
+    print()
+    
+    """graphes données tournées"""
+    A=[]
+    horizontale_sym=regroupe_tourne_gauche_sym[-1][1]
+    for k in range(len(total_tourne_sym[0])):
+        A.append(horizontale_sym)
+    plt.figure('graphes rotation')
+    plt.subplot(3,1,1)
+    plt.title('graphe rotation symetrie')
+    plt.plot(X_range,Y_range, label ='spline initiale')
+    plt.plot(total_tourne_sym[0],total_tourne_sym[1],label='spline tournée')
+    plt.plot(total_tourne_sym[0],A,label='"horizontale"')
+    plt.xlabel('échelle en micromètres')
+    plt.ylabel('échelle en micromètres')
+    plt.legend()
+    plt.show()
+    A=[]
+    horizontale_aligne_g=moindres_carres_aligne_gauche_gauche[1]
+    for k in range(len(total_aligne_gauche[0])):
+        A.append(moindres_carres_aligne_gauche_gauche[0]*total_aligne_gauche[0][k]+horizontale_aligne_g)
+    plt.subplot(3,1,3)
+    plt.title('graphe rotation alignement gauche')
+    plt.plot(X,Y, label ='spline initiale')
+    plt.plot(total_aligne_gauche[0],total_aligne_gauche[1],label='spline tournée')
+    plt.plot(total_aligne_gauche[0],A,label='"horizontale"')
+    plt.xlabel('échelle en micromètres')
+    plt.ylabel('échelle en micromètres')
+    plt.legend()
+    plt.show()
+    
+    """recherche point du fond"""
+    """ ___---___ symétrie ___---___ """
+    fond_caniveau_sym=recherche_point_mini(total_tourne_sym[0],total_tourne_sym[1])
+    print("profondeur symétrie",abs(regroupe_tourne_gauche_sym[-1][1]-fond_caniveau_sym[0][1]),"micromètres")
+    """ ___---___ alignement ___---___ """
+    fond_caniveau_aligne_gauche=recherche_point_mini(total_aligne_gauche[0],total_aligne_gauche[1])
+    print("profondeur alignement à gauche",abs(moindres_carres_aligne_gauche_gauche[0]*fond_caniveau_aligne_gauche[0][0]-fond_caniveau_aligne_gauche[0][1]+moindres_carres_aligne_gauche_gauche[1])/np.sqrt(1+moindres_carres_aligne_gauche_gauche[0]**2),"micromètres")
+    print()
+    
+    """calcul de la largeur"""
+    """ ___---___ largeur si symétrie ___---___ """
+    P_sym=recherche_point_largeur_gauche(regroupe_tourne_gauche_sym[-1],fond_caniveau_sym[0],fond_caniveau_sym[1],total_tourne_sym[0],total_tourne_sym[1],moindres_carres_tourne_gauche_sym[0],moindres_carres_tourne_gauche_sym[1],horizontale_sym)
+    P_prime_sym=recherche_point_largeur_droite2(fond_caniveau_sym[0],P_sym,total_tourne_sym[0],total_tourne_sym[1])
+    print("point largeur gauche, symétrie",P_sym)
+    print("point largeur droite, symétrie",P_prime_sym)
+    print("largeur caniveau symétrie =", np.sqrt((P_sym[0][0]-P_prime_sym[0])**2+(P_sym[0][1]-P_prime_sym[1])**2),"micromètres")
+    """ ___---___ largeur si alignement à gauche ___---___ """
+    P_gauche=recherche_point_largeur_gauche(regroupe_aligne_gauche_gauche[-1],fond_caniveau_aligne_gauche[0],fond_caniveau_aligne_gauche[1],total_aligne_gauche[0],total_aligne_gauche[1],moindres_carres_aligne_gauche_gauche[0],moindres_carres_aligne_gauche_gauche[1],horizontale_aligne_g)
+    P_prime_gauche=recherche_point_largeur_droite2(fond_caniveau_aligne_gauche[0],P_gauche,total_aligne_gauche[0],total_aligne_gauche[1])
+    print("point largeur gauche, alignement gauche :",P_gauche)
+    print("point largeur droite, alignement gauche :",P_prime_gauche)
+    print("largeur caniveau alignement gauche =", np.sqrt((P_gauche[0][0]-P_prime_gauche[0])**2+(P_gauche[0][1]-P_prime_gauche[1])**2),"micromètres")
+    print()
+    
+    """calcul du rayon de courbure haut et bas SYM"""    
+    i1_sym=rang_point(total_tourne_sym[0],point_H1)
+    j1_sym=rang_point(total_tourne_sym[0],point_H2)
+    CERCLE1_sym=cercle_moindres_carres(total_tourne_sym[0][i1_sym:j1_sym],total_tourne_sym[1][i1_sym:j1_sym])
+    print("cercle du haut, symétrie, coordonnées du centre (en microns) :",CERCLE1_sym[0][0],CERCLE1_sym[1][0])
+    print("cercle du haut, symétrie, rayon de courbure (en microns) :",CERCLE1_sym[2][0])
+    print("cercle du haut, symétrie, somme des carrées des écarts des y au y moyen/somme des carrées des écarts des y aux y calculés :",CERCLE1_sym[4][0])
+    print("cercle du haut, symétrie, moyenne des écarts au cercle des moindres carrés, en microns :", CERCLE1_sym[5][0])
+    print()
+    
+    i2_sym=rang_point(total_tourne_sym[0],point_B1)
+    j2_sym=rang_point(total_tourne_sym[0],point_B2)
+    CERCLE2_sym=cercle_moindres_carres(total_tourne_sym[0][i2_sym:j2_sym],total_tourne_sym[1][i2_sym:j2_sym])
+    print("cercle du bas, symétrie, coordonnées du centre (en microns) :",CERCLE2_sym[0][0],CERCLE2_sym[1][0])
+    print("cercle du bas, symétrie, rayon de courbure (en microns) :",CERCLE2_sym[2][0])
+    print("cercle du bas, symétrie, somme des carrées des écarts des y au y moyen/somme des carrées des écarts des y aux y calculés :",CERCLE2_sym[4][0])
+    print("cercle du bas, symétrie, moyenne des écarts au cercle des moindres carrés, en microns :", CERCLE2_sym[5][0])
+    print()
+    
+    """calcul du rayon de courbure haut et bas ALIGNE G"""  
+    i1_alig=rang_point(total_aligne_gauche[0],point_H1)
+    j1_alig=rang_point(total_aligne_gauche[0],point_H2)
+    CERCLE1_aligne_g=cercle_moindres_carres(total_aligne_gauche[0][i1_alig:j1_alig],total_aligne_gauche[1][i1_alig:j1_alig])
+    print("cercle du haut, alignement à gauche, coordonnées du centre (en microns) :",CERCLE1_aligne_g[0][0],CERCLE1_aligne_g[1][0])
+    print("cercle du haut, alignement à gauche, rayon de courbure (en microns) :",CERCLE1_aligne_g[2][0])
+    print("cercle du haut, alignement à gauche, somme des carrées des écarts des y au y moyen/somme des carrées des écarts des y aux y calculés :",CERCLE1_aligne_g[4][0])
+    print("cercle du haut, alignement à gauche, moyenne des écarts au cercle des moindres carrés, en microns :", CERCLE1_aligne_g[5][0])
+    print()
+
+    i2_alig=rang_point(total_aligne_gauche[0],point_B1)
+    j2_alig=rang_point(total_aligne_gauche[0],point_B2)
+    CERCLE2_aligne_g=cercle_moindres_carres(total_aligne_gauche[0][i2_alig:j2_alig],total_aligne_gauche[1][i2_alig:j2_alig])
+    print("cercle du bas, alignement à gauche, coordonnées du centre (en microns) :",CERCLE2_aligne_g[0][0],CERCLE2_aligne_g[1][0])
+    print("cercle du bas, alignement à gauche, rayon de courbure (en microns) :",CERCLE2_aligne_g[2][0])
+    print("cercle du bas, alignement à gauche, somme des carrées des écarts des y au y moyen/somme des carrées des écarts des y aux y calculés :",CERCLE2_aligne_g[4][0])
+    print("cercle du bas, alignement à gauche, moyenne des écarts au cercle des moindres carrés, en microns :", CERCLE2_aligne_g[5][0])
+
+    """ Graphes cercles """
+    plt.figure('cercles')
+    plt.subplot(3,1,1)
+    plt.title('symetrie')
+    plt.plot(total_tourne_sym[0],total_tourne_sym[1],label='donnees symétrisées')
+    plt.plot(total_tourne_sym[0],[horizontale_sym for k in range(len(total_tourne_sym[0]))],label='horizontale')
+    plt.plot(total_tourne_sym[0][i1_sym:j1_sym],total_tourne_sym[1][i1_sym:j1_sym],label='points cercle haut')
+    plt.plot(total_tourne_sym[0][i1_sym:j1_sym],CERCLE1_sym[3],label='cercle haut')
+    plt.plot(total_tourne_sym[0][i2_sym:j2_sym],total_tourne_sym[1][i2_sym:j2_sym],label='points cercle bas')
+    plt.plot(total_tourne_sym[0][i2_sym:j2_sym],CERCLE2_sym[3],label='cercle bas')
+    plt.xlabel('échelle en micromètres')
+    plt.ylabel('échelle en micromètres')
+    plt.legend()
+    plt.subplot(3,1,3)
+    plt.title('aligmenent gauche')
+    plt.plot(total_aligne_gauche[0],total_aligne_gauche[1],label='donnees alignées à gauche')
+    plt.plot(total_aligne_gauche[0],[horizontale_aligne_g for k in range(len(total_aligne_gauche[0]))],label='horizontale')
+    plt.plot(total_aligne_gauche[0][i1_alig:j1_alig],total_aligne_gauche[1][i1_alig:j1_alig],label='points cercle haut')
+    plt.plot(total_aligne_gauche[0][i1_alig:j1_alig],CERCLE1_aligne_g[3],label='cercle haut')
+    plt.plot(total_aligne_gauche[0][i2_alig:j2_alig],total_aligne_gauche[1][i2_alig:j2_alig],label='points cercle bas')
+    plt.plot(total_aligne_gauche[0][i2_alig:j2_alig],CERCLE2_aligne_g[3],label='cercle bas')
+    plt.xlabel('échelle en micromètres')
+    plt.ylabel('échelle en micromètres')
+    plt.legend()
+    plt.show()
+    return
+
+def recapitulatif_Bspline_input(fichier):
+    
+    """récupération données obtenues"""
+    donnees_brutes=recuperation_points(fichier)    
+    donnees_triees_X=tri_coordonnees(donnees_brutes)
+    XY_separes=separe_XY(donnees_triees_X)
+    X=XY_separes[0]
+    Y=XY_separes[1]
+
+    """B-spline"""
+    Y_spl = UnivariateSpline(X,Y)
+    X_range = np.linspace(X[0],X[-1],10000)
+    Y_range = Y_spl(X_range)
+    plt.figure('graphe donnees + splines')
+    plt.subplot(3,1,2)
+    plt.plot(X,Y,'+',label='donnees')
+    plt.plot(X_range,Y_range)
+    plt.legend()
+    plt.show()
+    
+    """recherche tôles"""        
+    XY_regroupes=regroupement(X_range,Y_range)
+    print(XY_regroupes)
+    print()
+    print("CI-DESSUS : liste des points = aide à l'estimation pour le seuil utile pour trouver les tôles")
+    print("longueur de la liste de points",len(XY_regroupes))
+    print()
+    chaine_longueurg=input('nombre de points à regarder en avant pour la définition du plan (tôle) DE GAUCHE ')
+    longueurg=int(chaine_longueurg)
+    chaine_seuilg=input('hauteur seuil en microns pour le plan DE GAUCHE ')
+    seuilg=int(chaine_seuilg)
+    
+    chaine_longueurd=input('nombre de points à regarder en avant pour la définition du plan (tôle) DE DROITE ')
+    longueurd=int(chaine_longueurd)
+    chaine_seuild=input('hauteur seuil en microns pour le plan DE DROITE ')
+    seuild=int(chaine_seuild)
+
+    plan_gauche=recherche_plan_gauche(XY_regroupes,longueurg,seuilg)
+    plan_droite=recherche_plan_droite(XY_regroupes,longueurd,seuild)
+    XY_plan_gauche=separe_XY(plan_gauche)
+    XY_plan_droite=separe_XY(plan_droite)
+    X_plan_gauche=XY_plan_gauche[0]
+    Y_plan_gauche=XY_plan_gauche[1]
+    X_plan_droite=XY_plan_droite[0]
+    Y_plan_droite=XY_plan_droite[1]
+    
+    """graphe données + tôles"""
+    
+    plt.figure('graphes toles')
+    plt.subplot(3,1,1)
+    plt.plot(X_range,Y_range)
+    plt.plot(X_plan_gauche,Y_plan_gauche,label='gauche')
+    plt.plot(X_plan_droite,Y_plan_droite,label='droite')
+    plt.xlabel('échelle en micromètres')
+    plt.ylabel('échelle en micromètres')
+    plt.show()
+    
+    """droites des moindres carrées des tôles"""
+    moindres_carres_gauche=moindres_carres(plan_gauche)
+    moindres_carres_droite=moindres_carres(plan_droite)
+    a_gauche=moindres_carres_gauche[0]
+    b_gauche=moindres_carres_gauche[1]
+    a_droite=moindres_carres_droite[0]
+    b_droite=moindres_carres_droite[1]
+    print('coefficient directeur tôle de gauche',a_gauche)
+    print('coefficient directeur tôle de droite',a_droite)
+    print("erreur moindre carres gauche :",moindres_carres_gauche[2])
+    print("erreur moindre carres droite :",moindres_carres_droite[2])
+    print()
+    Y_moindres_carres_gauche=calcul_droite(X_plan_gauche,a_gauche,b_gauche)
+    Y_moindres_carres_droite=calcul_droite(X_plan_droite,a_droite,b_droite)
+    plt.subplot(3,1,3)
+    plt.title('graphe droites')
+    plt.plot(X_range,Y_range)
+    plt.plot(X_plan_gauche,Y_moindres_carres_gauche,label='gauche')
+    plt.plot(X_plan_droite,Y_moindres_carres_droite,label='droite')
+    plt.xlabel('échelle en micromètres')
+    plt.ylabel('échelle en micromètres')
+    plt.show()
+    
+    """calcul des bissectrices"""
+    bissectrice1=bissectrice_plus(a_gauche,b_gauche,a_droite,b_droite)
+    bissectrice2=bissectrice_moins(a_gauche,b_gauche,a_droite,b_droite)
+    A1=bissectrice1[0]
+    A2=bissectrice2[0]
+    print("coefficient directeur bissectrice 1 :", A1)
+    print("coefficient directeur bissectrice 2 :", A2)
+    print("comparaison des angles (arctg1 puis arctg2) : ",np.arctan(A1), np.arctan(A2))
+    print()
+    
+    """rotations"""
+    """ -- symétrie -- """
+    angle_rotation_sym=(-np.arctan(angle_minimal(A1,A2)))
+    total_tourne_sym=rotation(angle_rotation_sym,X_range,Y_range,[X[0],Y[0]])
+    total_tourne_gauche_sym=rotation(angle_rotation_sym,X_plan_gauche,Y_plan_gauche,[X[0],Y[0]])
+    total_tourne_droite_sym=rotation(angle_rotation_sym,X_plan_droite,Y_plan_droite,[X[0],Y[0]])
+    regroupe_tourne_gauche_sym=regroupement(total_tourne_gauche_sym[0],total_tourne_gauche_sym[1])
+    regroupe_tourne_droite_sym=regroupement(total_tourne_droite_sym[0],total_tourne_droite_sym[1])
+    moindres_carres_tourne_gauche_sym=moindres_carres(regroupe_tourne_gauche_sym)
+    moindres_carres_tourne_droite_sym=moindres_carres(regroupe_tourne_droite_sym)
+    print("coefficient directeur gauche après rotation :",moindres_carres_tourne_gauche_sym[0])
+    print("coefficient directeur droite après rotation :",moindres_carres_tourne_droite_sym[0])
+    print("|g/d|=",abs(moindres_carres_tourne_gauche_sym[0]/moindres_carres_tourne_droite_sym[0]))
+    print()
+    """ -- gauche horizontale -- """
+    angle_rotation_gauche=(-np.arctan(a_gauche))
+    total_aligne_gauche=rotation(angle_rotation_gauche,X_range,Y_range,[X[0],Y[0]])
+    total_aligne_gauche_gauche=rotation(angle_rotation_gauche,X_plan_gauche,Y_plan_gauche,[X[0],Y[0]])
+    total_aligne_droite_gauche=rotation(angle_rotation_gauche,X_plan_droite,Y_plan_droite,[X[0],Y[0]])
+    regroupe_aligne_gauche_gauche=regroupement(total_aligne_gauche_gauche[0],total_aligne_gauche_gauche[1])
+    regroupe_aligne_droite_gauche=regroupement(total_aligne_droite_gauche[0],total_aligne_droite_gauche[1])
+    moindres_carres_aligne_gauche_gauche=moindres_carres(regroupe_aligne_gauche_gauche)
+    moindres_carres_aligne_droite_gauche=moindres_carres(regroupe_aligne_droite_gauche)
+    print("coefficient directeur gauche après alignement :",moindres_carres_aligne_gauche_gauche[0])
+    print("coefficient directeur droite après alignement :",moindres_carres_aligne_droite_gauche[0])
+    print("angle désalignement plaques (en degrés) :", np.arctan(moindres_carres_aligne_droite_gauche[0])*180/np.pi)
+    print()
+    
+    """graphes données tournées"""
+    A=[]
+    horizontale_sym=regroupe_tourne_gauche_sym[-1][1]
+    for k in range(len(total_tourne_sym[0])):
+        A.append(horizontale_sym)
+    plt.figure('graphes rotation')
+    plt.subplot(3,1,1)
+    plt.title('graphe rotation symetrie')
+    plt.plot(X_range,Y_range, label ='spline initiale')
+    plt.plot(total_tourne_sym[0],total_tourne_sym[1],label='spline tournée')
+    plt.plot(total_tourne_sym[0],A,label='"horizontale"')
+    plt.xlabel('échelle en micromètres')
+    plt.ylabel('échelle en micromètres')
+    plt.legend()
+    plt.show()
+    A=[]
+    horizontale_aligne_g=moindres_carres_aligne_gauche_gauche[1]
+    for k in range(len(total_aligne_gauche[0])):
+        A.append(moindres_carres_aligne_gauche_gauche[0]*total_aligne_gauche[0][k]+horizontale_aligne_g)
+    plt.subplot(3,1,3)
+    plt.title('graphe rotation alignement gauche')
+    plt.plot(X,Y, label ='spline initiale')
+    plt.plot(total_aligne_gauche[0],total_aligne_gauche[1],label='spline tournée')
+    plt.plot(total_aligne_gauche[0],A,label='"horizontale"')
+    plt.xlabel('échelle en micromètres')
+    plt.ylabel('échelle en micromètres')
+    plt.legend()
+    plt.show()
+    
+    """recherche point du fond"""
+    """ ___---___ symétrie ___---___ """
+    fond_caniveau_sym=recherche_point_mini(total_tourne_sym[0],total_tourne_sym[1])
+    print("profondeur symétrie",abs(regroupe_tourne_gauche_sym[-1][1]-fond_caniveau_sym[0][1]),"micromètres")
+    """ ___---___ alignement ___---___ """
+    fond_caniveau_aligne_gauche=recherche_point_mini(total_aligne_gauche[0],total_aligne_gauche[1])
+    print("profondeur alignement à gauche",abs(moindres_carres_aligne_gauche_gauche[0]*fond_caniveau_aligne_gauche[0][0]-fond_caniveau_aligne_gauche[0][1]+moindres_carres_aligne_gauche_gauche[1])/np.sqrt(1+moindres_carres_aligne_gauche_gauche[0]**2),"micromètres")
+    print()
+    
+    """calcul de la largeur"""
+    """ ___---___ largeur si symétrie ___---___ """
+    P_sym=recherche_point_largeur_gauche(regroupe_tourne_gauche_sym[-1],fond_caniveau_sym[0],fond_caniveau_sym[1],total_tourne_sym[0],total_tourne_sym[1],moindres_carres_tourne_gauche_sym[0],moindres_carres_tourne_gauche_sym[1],horizontale_sym)
+    P_prime_sym=recherche_point_largeur_droite2(fond_caniveau_sym[0],P_sym,total_tourne_sym[0],total_tourne_sym[1])
+    print("point largeur gauche, symétrie",P_sym)
+    print("point largeur droite, symétrie",P_prime_sym)
+    print("largeur caniveau symétrie =", np.sqrt((P_sym[0][0]-P_prime_sym[0])**2+(P_sym[0][1]-P_prime_sym[1])**2),"micromètres")
+    """ ___---___ largeur si alignement à gauche ___---___ """
+    P_gauche=recherche_point_largeur_gauche(regroupe_aligne_gauche_gauche[-1],fond_caniveau_aligne_gauche[0],fond_caniveau_aligne_gauche[1],total_aligne_gauche[0],total_aligne_gauche[1],moindres_carres_aligne_gauche_gauche[0],moindres_carres_aligne_gauche_gauche[1],horizontale_aligne_g)
+    P_prime_gauche=recherche_point_largeur_droite2(fond_caniveau_aligne_gauche[0],P_gauche,total_aligne_gauche[0],total_aligne_gauche[1])
+    print("point largeur gauche, alignement gauche :",P_gauche)
+    print("point largeur droite, alignement gauche :",P_prime_gauche)
+    print("largeur caniveau alignement gauche =", np.sqrt((P_gauche[0][0]-P_prime_gauche[0])**2+(P_gauche[0][1]-P_prime_gauche[1])**2),"micromètres")
+    print()
+    
+    """calcul du rayon de courbure haut et bas SYM"""
+    chaine_P1=input("abscisse du premier point de définition de l'arc de cercle gauche symétrie ")
+    point_H1=int(chaine_P1)
+    chaine_P2=input("abscisse du second point de définition de l'arc de cercle gauche symétrie ")
+    point_H2=int(chaine_P2)
+    
+    i1_sym=rang_point(total_tourne_sym[0],point_H1)
+    j1_sym=rang_point(total_tourne_sym[0],point_H2)
+    CERCLE1_sym=cercle_moindres_carres(total_tourne_sym[0][i1_sym:j1_sym],total_tourne_sym[1][i1_sym:j1_sym])
+    print("cercle du haut, symétrie, coordonnées du centre (en microns) :",CERCLE1_sym[0][0],CERCLE1_sym[1][0])
+    print("cercle du haut, symétrie, rayon de courbure (en microns) :",CERCLE1_sym[2][0])
+    print("cercle du haut, symétrie, somme des carrées des écarts des y au y moyen/somme des carrées des écarts des y aux y calculés :",CERCLE1_sym[4][0])
+    print("cercle du haut, symétrie, moyenne des écarts au cercle des moindres carrés, en microns :", CERCLE1_sym[5][0])
+    print()
+
+    chaine_B1=input("abscisse du premier point de définition de l'arc de cercle de fond de caniveau symétrie ")
+    point_B1=int(chaine_B1)
+    chaine_B2=input("abscisse du second point de définition de l'arc de cercle de fond de caniveau symétrie ")
+    point_B2=int(chaine_B2)
+    
+    i2_sym=rang_point(total_tourne_sym[0],point_B1)
+    j2_sym=rang_point(total_tourne_sym[0],point_B2)
+    CERCLE2_sym=cercle_moindres_carres(total_tourne_sym[0][i2_sym:j2_sym],total_tourne_sym[1][i2_sym:j2_sym])
+    print("cercle du bas, symétrie, coordonnées du centre (en microns) :",CERCLE2_sym[0][0],CERCLE2_sym[1][0])
+    print("cercle du bas, symétrie, rayon de courbure (en microns) :",CERCLE2_sym[2][0])
+    print("cercle du bas, symétrie, somme des carrées des écarts des y au y moyen/somme des carrées des écarts des y aux y calculés :",CERCLE2_sym[4][0])
+    print("cercle du bas, symétrie, moyenne des écarts au cercle des moindres carrés, en microns :", CERCLE2_sym[5][0])
+    print()
+    
+    """calcul du rayon de courbure haut et bas ALIGNE G"""
+    chaine_P1=input("abscisse du premier point de définition de l'arc de cercle gauche alignement gauche ")
+    point_H1=int(chaine_P1)
+    chaine_P2=input("abscisse du second point de définition de l'arc de cercle gauche alignement gauche ")
+    point_H2=int(chaine_P2)
+    
+    i1_alig=rang_point(total_aligne_gauche[0],point_H1)
+    j1_alig=rang_point(total_aligne_gauche[0],point_H2)
+    CERCLE1_aligne_g=cercle_moindres_carres(total_aligne_gauche[0][i1_alig:j1_alig],total_aligne_gauche[1][i1_alig:j1_alig])
+    print("cercle du haut, alignement à gauche, coordonnées du centre (en microns) :",CERCLE1_aligne_g[0][0],CERCLE1_aligne_g[1][0])
+    print("cercle du haut, alignement à gauche, rayon de courbure (en microns) :",CERCLE1_aligne_g[2][0])
+    print("cercle du haut, alignement à gauche, somme des carrées des écarts des y au y moyen/somme des carrées des écarts des y aux y calculés :",CERCLE1_aligne_g[4][0])
+    print("cercle du haut, alignement à gauche, moyenne des écarts au cercle des moindres carrés, en microns :", CERCLE1_aligne_g[5][0])
+    print()
+
+    chaine_B1=input("abscisse du premier point de définition de l'arc de cercle de fond de caniveau alignement gauche ")
+    point_B1=int(chaine_B1)
+    chaine_B2=input("abscisse du second point de définition de l'arc de cercle de fond de caniveau alignement gauche ")
+    point_B2=int(chaine_B2)
+    
+    i2_alig=rang_point(total_aligne_gauche[0],point_B1)
+    j2_alig=rang_point(total_aligne_gauche[0],point_B2)
+    CERCLE2_aligne_g=cercle_moindres_carres(total_aligne_gauche[0][i2_alig:j2_alig],total_aligne_gauche[1][i2_alig:j2_alig])
+    print("cercle du bas, alignement à gauche, coordonnées du centre (en microns) :",CERCLE2_aligne_g[0][0],CERCLE2_aligne_g[1][0])
+    print("cercle du bas, alignement à gauche, rayon de courbure (en microns) :",CERCLE2_aligne_g[2][0])
+    print("cercle du bas, alignement à gauche, somme des carrées des écarts des y au y moyen/somme des carrées des écarts des y aux y calculés :",CERCLE2_aligne_g[4][0])
+    print("cercle du bas, alignement à gauche, moyenne des écarts au cercle des moindres carrés, en microns :", CERCLE2_aligne_g[5][0])
+
+    """ Graphes cercles """
+    plt.figure('cercles')
+    plt.subplot(3,1,1)
+    plt.title('symetrie')
+    plt.plot(total_tourne_sym[0],total_tourne_sym[1],label='donnees symétrisées')
+    plt.plot(total_tourne_sym[0],[horizontale_sym for k in range(len(total_tourne_sym[0]))],label='horizontale')
+    plt.plot(total_tourne_sym[0][i1_sym:j1_sym],total_tourne_sym[1][i1_sym:j1_sym],label='points cercle haut')
+    plt.plot(total_tourne_sym[0][i1_sym:j1_sym],CERCLE1_sym[3],label='cercle haut')
+    plt.plot(total_tourne_sym[0][i2_sym:j2_sym],total_tourne_sym[1][i2_sym:j2_sym],label='points cercle bas')
+    plt.plot(total_tourne_sym[0][i2_sym:j2_sym],CERCLE2_sym[3],label='cercle bas')
+    plt.xlabel('échelle en micromètres')
+    plt.ylabel('échelle en micromètres')
+    plt.legend()
+    plt.subplot(3,1,3)
+    plt.title('aligmenent gauche')
+    plt.plot(total_aligne_gauche[0],total_aligne_gauche[1],label='donnees alignées à gauche')
+    plt.plot(total_aligne_gauche[0],[horizontale_aligne_g for k in range(len(total_aligne_gauche[0]))],label='horizontale')
+    plt.plot(total_aligne_gauche[0][i1_alig:j1_alig],total_aligne_gauche[1][i1_alig:j1_alig],label='points cercle haut')
+    plt.plot(total_aligne_gauche[0][i1_alig:j1_alig],CERCLE1_aligne_g[3],label='cercle haut')
+    plt.plot(total_aligne_gauche[0][i2_alig:j2_alig],total_aligne_gauche[1][i2_alig:j2_alig],label='points cercle bas')
+    plt.plot(total_aligne_gauche[0][i2_alig:j2_alig],CERCLE2_aligne_g[3],label='cercle bas')
+    plt.xlabel('échelle en micromètres')
+    plt.ylabel('échelle en micromètres')
+    plt.legend()
+    plt.show()
+    return
+
+def recapitulatif_Bspline_inversion(fichier,longueurg,seuilg,longueurd,seuild,point_H1,point_H2,point_B1,point_B2):
+    
+    """récupération données obtenues"""
+    donnees_brutes=recuperation_points(fichier)    
+    donnees_triees_X=tri_coordonnees(donnees_brutes)
+    donnees_inversees=inversion(donnees_triees_X)
+    print(donnees_inversees)
+    XY_separes=separe_XY(donnees_inversees)
+    X=XY_separes[0]
+    Y=XY_separes[1]
+
+    """B-spline"""
+    Y_spl = UnivariateSpline(X,Y)
+    X_range = np.linspace(X[0],X[-1],10000)
+    Y_range = Y_spl(X_range)
+    plt.figure('graphe donnees + splines')
+    plt.subplot(3,1,2)
+    plt.plot(X,Y,'+',label='donnees')
+    plt.plot(X_range,Y_range)
+    plt.legend()
+    plt.show()
+    
+    """recherche tôles"""        
+    XY_regroupes=regroupement(X_range,Y_range)
+    plan_gauche=recherche_plan_gauche(XY_regroupes,longueurg,seuilg)
+    plan_droite=recherche_plan_droite(XY_regroupes,longueurd,seuild)
+    XY_plan_gauche=separe_XY(plan_gauche)
+    XY_plan_droite=separe_XY(plan_droite)
+    X_plan_gauche=XY_plan_gauche[0]
+    Y_plan_gauche=XY_plan_gauche[1]
+    X_plan_droite=XY_plan_droite[0]
+    Y_plan_droite=XY_plan_droite[1]
+    
+    """graphe données + tôles"""
+    
+    plt.figure('graphes toles')
+    plt.subplot(3,1,1)
+    plt.plot(X_range,Y_range)
+    plt.plot(X_plan_gauche,Y_plan_gauche,label='gauche')
+    plt.plot(X_plan_droite,Y_plan_droite,label='droite')
+    plt.xlabel('échelle en micromètres')
+    plt.ylabel('échelle en micromètres')
+    plt.show()
+    
+    """droites des moindres carrées des tôles"""
+    moindres_carres_gauche=moindres_carres(plan_gauche)
+    moindres_carres_droite=moindres_carres(plan_droite)
+    a_gauche=moindres_carres_gauche[0]
+    b_gauche=moindres_carres_gauche[1]
+    a_droite=moindres_carres_droite[0]
+    b_droite=moindres_carres_droite[1]
+    print('coefficient directeur tôle de gauche',a_gauche)
+    print('coefficient directeur tôle de droite',a_droite)
+    print("erreur moindre carres gauche :",moindres_carres_gauche[2])
+    print("erreur moindre carres droite :",moindres_carres_droite[2])
+    print()
+    Y_moindres_carres_gauche=calcul_droite(X_plan_gauche,a_gauche,b_gauche)
+    Y_moindres_carres_droite=calcul_droite(X_plan_droite,a_droite,b_droite)
+    plt.subplot(3,1,3)
+    plt.title('graphe droites')
+    plt.plot(X_range,Y_range)
+    plt.plot(X_plan_gauche,Y_moindres_carres_gauche,label='gauche')
+    plt.plot(X_plan_droite,Y_moindres_carres_droite,label='droite')
+    plt.xlabel('échelle en micromètres')
+    plt.ylabel('échelle en micromètres')
+    plt.show()
+    
+    """calcul des bissectrices"""
+    bissectrice1=bissectrice_plus(a_gauche,b_gauche,a_droite,b_droite)
+    bissectrice2=bissectrice_moins(a_gauche,b_gauche,a_droite,b_droite)
+    A1=bissectrice1[0]
+    A2=bissectrice2[0]
+    print("coefficient directeur bissectrice 1 :", A1)
+    print("coefficient directeur bissectrice 2 :", A2)
+    print("comparaison des angles (arctg1 puis arctg2) : ",np.arctan(A1), np.arctan(A2))
+    print()
+    
+    """rotations"""
+    """ -- symétrie -- """
+    angle_rotation_sym=(-np.arctan(angle_minimal(A1,A2)))
+    total_tourne_sym=rotation(angle_rotation_sym,X_range,Y_range,[X[0],Y[0]])
+    total_tourne_gauche_sym=rotation(angle_rotation_sym,X_plan_gauche,Y_plan_gauche,[X[0],Y[0]])
+    total_tourne_droite_sym=rotation(angle_rotation_sym,X_plan_droite,Y_plan_droite,[X[0],Y[0]])
+    regroupe_tourne_gauche_sym=regroupement(total_tourne_gauche_sym[0],total_tourne_gauche_sym[1])
+    regroupe_tourne_droite_sym=regroupement(total_tourne_droite_sym[0],total_tourne_droite_sym[1])
+    moindres_carres_tourne_gauche_sym=moindres_carres(regroupe_tourne_gauche_sym)
+    moindres_carres_tourne_droite_sym=moindres_carres(regroupe_tourne_droite_sym)
+    print("coefficient directeur gauche après rotation :",moindres_carres_tourne_gauche_sym[0])
+    print("coefficient directeur droite après rotation :",moindres_carres_tourne_droite_sym[0])
+    print("|g/d|=",abs(moindres_carres_tourne_gauche_sym[0]/moindres_carres_tourne_droite_sym[0]))
+    print()
+    """ -- gauche horizontale -- """
+    angle_rotation_gauche=(-np.arctan(a_gauche))
+    total_aligne_gauche=rotation(angle_rotation_gauche,X_range,Y_range,[X[0],Y[0]])
+    total_aligne_gauche_gauche=rotation(angle_rotation_gauche,X_plan_gauche,Y_plan_gauche,[X[0],Y[0]])
+    total_aligne_droite_gauche=rotation(angle_rotation_gauche,X_plan_droite,Y_plan_droite,[X[0],Y[0]])
+    regroupe_aligne_gauche_gauche=regroupement(total_aligne_gauche_gauche[0],total_aligne_gauche_gauche[1])
+    regroupe_aligne_droite_gauche=regroupement(total_aligne_droite_gauche[0],total_aligne_droite_gauche[1])
+    moindres_carres_aligne_gauche_gauche=moindres_carres(regroupe_aligne_gauche_gauche)
+    moindres_carres_aligne_droite_gauche=moindres_carres(regroupe_aligne_droite_gauche)
+    print("coefficient directeur gauche après alignement :",moindres_carres_aligne_gauche_gauche[0])
+    print("coefficient directeur droite après alignement :",moindres_carres_aligne_droite_gauche[0])
+    print("angle désalignement plaques (en degrés) :", np.arctan(moindres_carres_aligne_droite_gauche[0])*180/np.pi)
+    print()
+    
+    """graphes données tournées"""
+    A=[]
+    horizontale_sym=regroupe_tourne_gauche_sym[-1][1]
+    for k in range(len(total_tourne_sym[0])):
+        A.append(horizontale_sym)
+    plt.figure('graphes rotation')
+    plt.subplot(3,1,1)
+    plt.title('graphe rotation symetrie')
+    plt.plot(X_range,Y_range, label ='spline initiale')
+    plt.plot(total_tourne_sym[0],total_tourne_sym[1],label='spline tournée')
+    plt.plot(total_tourne_sym[0],A,label='"horizontale"')
+    plt.xlabel('échelle en micromètres')
+    plt.ylabel('échelle en micromètres')
+    plt.legend()
+    plt.show()
+    A=[]
+    horizontale_aligne_g=moindres_carres_aligne_gauche_gauche[1]
+    for k in range(len(total_aligne_gauche[0])):
+        A.append(moindres_carres_aligne_gauche_gauche[0]*total_aligne_gauche[0][k]+horizontale_aligne_g)
+    plt.subplot(3,1,3)
+    plt.title('graphe rotation alignement gauche')
+    plt.plot(X,Y, label ='spline initiale')
+    plt.plot(total_aligne_gauche[0],total_aligne_gauche[1],label='spline tournée')
+    plt.plot(total_aligne_gauche[0],A,label='"horizontale"')
+    plt.xlabel('échelle en micromètres')
+    plt.ylabel('échelle en micromètres')
+    plt.legend()
+    plt.show()
+    
+    """recherche point du fond"""
+    """ ___---___ symétrie ___---___ """
+    fond_caniveau_sym=recherche_point_mini(total_tourne_sym[0],total_tourne_sym[1])
+    print("profondeur symétrie",abs(regroupe_tourne_gauche_sym[-1][1]-fond_caniveau_sym[0][1]),"micromètres")
+    """ ___---___ alignement ___---___ """
+    fond_caniveau_aligne_gauche=recherche_point_mini(total_aligne_gauche[0],total_aligne_gauche[1])
+    print("profondeur alignement à gauche",abs(moindres_carres_aligne_gauche_gauche[0]*fond_caniveau_aligne_gauche[0][0]-fond_caniveau_aligne_gauche[0][1]+moindres_carres_aligne_gauche_gauche[1])/np.sqrt(1+moindres_carres_aligne_gauche_gauche[0]**2),"micromètres")
+    print()
+    
+    """calcul de la largeur"""
+    """ ___---___ largeur si symétrie ___---___ """
+    P_sym=recherche_point_largeur_gauche(regroupe_tourne_gauche_sym[-1],fond_caniveau_sym[0],fond_caniveau_sym[1],total_tourne_sym[0],total_tourne_sym[1],moindres_carres_tourne_gauche_sym[0],moindres_carres_tourne_gauche_sym[1],horizontale_sym)
+    P_prime_sym=recherche_point_largeur_droite2(fond_caniveau_sym[0],P_sym,total_tourne_sym[0],total_tourne_sym[1])
+    print("point largeur gauche, symétrie",P_sym)
+    print("point largeur droite, symétrie",P_prime_sym)
+    print("largeur caniveau symétrie =", np.sqrt((P_sym[0][0]-P_prime_sym[0])**2+(P_sym[0][1]-P_prime_sym[1])**2),"micromètres")
+    """ ___---___ largeur si alignement à gauche ___---___""" 
+    P_gauche=recherche_point_largeur_gauche(regroupe_aligne_gauche_gauche[-1],fond_caniveau_aligne_gauche[0],fond_caniveau_aligne_gauche[1],total_aligne_gauche[0],total_aligne_gauche[1],moindres_carres_aligne_gauche_gauche[0],moindres_carres_aligne_gauche_gauche[1],horizontale_aligne_g)
+    P_prime_gauche=recherche_point_largeur_droite2(fond_caniveau_aligne_gauche[0],P_gauche,total_aligne_gauche[0],total_aligne_gauche[1])
+    print("point largeur gauche, alignement gauche :",P_gauche)
+    print("point largeur droite, alignement gauche :",P_prime_gauche)
+    print("largeur caniveau alignement gauche =", np.sqrt((P_gauche[0][0]-P_prime_gauche[0])**2+(P_gauche[0][1]-P_prime_gauche[1])**2),"micromètres")
+    print()
+    
+    """calcul du rayon de courbure haut et bas SYM"""    
+    i1_sym=rang_point(total_tourne_sym[0],point_H1)
+    j1_sym=rang_point(total_tourne_sym[0],point_H2)
+    CERCLE1_sym=cercle_moindres_carres(total_tourne_sym[0][i1_sym:j1_sym],total_tourne_sym[1][i1_sym:j1_sym])
+    print("cercle du haut, symétrie, coordonnées du centre (en microns) :",CERCLE1_sym[0][0],CERCLE1_sym[1][0])
+    print("cercle du haut, symétrie, rayon de courbure (en microns) :",CERCLE1_sym[2][0])
+    print("cercle du haut, symétrie, somme des carrées des écarts des y au y moyen/somme des carrées des écarts des y aux y calculés :",CERCLE1_sym[4][0])
+    print("cercle du haut, symétrie, moyenne des écarts au cercle des moindres carrés, en microns :", CERCLE1_sym[5][0])
+    print()
+    
+    i2_sym=rang_point(total_tourne_sym[0],point_B1)
+    j2_sym=rang_point(total_tourne_sym[0],point_B2)
+    CERCLE2_sym=cercle_moindres_carres(total_tourne_sym[0][i2_sym:j2_sym],total_tourne_sym[1][i2_sym:j2_sym])
+    print("cercle du bas, symétrie, coordonnées du centre (en microns) :",CERCLE2_sym[0][0],CERCLE2_sym[1][0])
+    print("cercle du bas, symétrie, rayon de courbure (en microns) :",CERCLE2_sym[2][0])
+    print("cercle du bas, symétrie, somme des carrées des écarts des y au y moyen/somme des carrées des écarts des y aux y calculés :",CERCLE2_sym[4][0])
+    print("cercle du bas, symétrie, moyenne des écarts au cercle des moindres carrés, en microns :", CERCLE2_sym[5][0])
+    print()
+    
+    """calcul du rayon de courbure haut et bas ALIGNE G"""  
+    i1_alig=rang_point(total_aligne_gauche[0],point_H1)
+    j1_alig=rang_point(total_aligne_gauche[0],point_H2)
+    CERCLE1_aligne_g=cercle_moindres_carres(total_aligne_gauche[0][i1_alig:j1_alig],total_aligne_gauche[1][i1_alig:j1_alig])
+    print("cercle du haut, alignement à gauche, coordonnées du centre (en microns) :",CERCLE1_aligne_g[0][0],CERCLE1_aligne_g[1][0])
+    print("cercle du haut, alignement à gauche, rayon de courbure (en microns) :",CERCLE1_aligne_g[2][0])
+    print("cercle du haut, alignement à gauche, somme des carrées des écarts des y au y moyen/somme des carrées des écarts des y aux y calculés :",CERCLE1_aligne_g[4][0])
+    print("cercle du haut, alignement à gauche, moyenne des écarts au cercle des moindres carrés, en microns :", CERCLE1_aligne_g[5][0])
+    print()
+
+    i2_alig=rang_point(total_aligne_gauche[0],point_B1)
+    j2_alig=rang_point(total_aligne_gauche[0],point_B2)
+    CERCLE2_aligne_g=cercle_moindres_carres(total_aligne_gauche[0][i2_alig:j2_alig],total_aligne_gauche[1][i2_alig:j2_alig])
+    print("cercle du bas, alignement à gauche, coordonnées du centre (en microns) :",CERCLE2_aligne_g[0][0],CERCLE2_aligne_g[1][0])
+    print("cercle du bas, alignement à gauche, rayon de courbure (en microns) :",CERCLE2_aligne_g[2][0])
+    print("cercle du bas, alignement à gauche, somme des carrées des écarts des y au y moyen/somme des carrées des écarts des y aux y calculés :",CERCLE2_aligne_g[4][0])
+    print("cercle du bas, alignement à gauche, moyenne des écarts au cercle des moindres carrés, en microns :", CERCLE2_aligne_g[5][0])
+
+    """ Graphes cercles """
+    plt.figure('cercles')
+    plt.subplot(3,1,1)
+    plt.title('symetrie')
+    plt.plot(total_tourne_sym[0],total_tourne_sym[1],label='donnees symétrisées')
+    plt.plot(total_tourne_sym[0],[horizontale_sym for k in range(len(total_tourne_sym[0]))],label='horizontale')
+    plt.plot(total_tourne_sym[0][i1_sym:j1_sym],total_tourne_sym[1][i1_sym:j1_sym],label='points cercle haut')
+    plt.plot(total_tourne_sym[0][i1_sym:j1_sym],CERCLE1_sym[3],label='cercle haut')
+    plt.plot(total_tourne_sym[0][i2_sym:j2_sym],total_tourne_sym[1][i2_sym:j2_sym],label='points cercle bas')
+    plt.plot(total_tourne_sym[0][i2_sym:j2_sym],CERCLE2_sym[3],label='cercle bas')
+    plt.xlabel('échelle en micromètres')
+    plt.ylabel('échelle en micromètres')
+    plt.legend()
+    plt.subplot(3,1,3)
+    plt.title('aligmenent gauche')
+    plt.plot(total_aligne_gauche[0],total_aligne_gauche[1],label='donnees alignées à gauche')
+    plt.plot(total_aligne_gauche[0],[horizontale_aligne_g for k in range(len(total_aligne_gauche[0]))],label='horizontale')
+    plt.plot(total_aligne_gauche[0][i1_alig:j1_alig],total_aligne_gauche[1][i1_alig:j1_alig],label='points cercle haut')
+    plt.plot(total_aligne_gauche[0][i1_alig:j1_alig],CERCLE1_aligne_g[3],label='cercle haut')
+    plt.plot(total_aligne_gauche[0][i2_alig:j2_alig],total_aligne_gauche[1][i2_alig:j2_alig],label='points cercle bas')
+    plt.plot(total_aligne_gauche[0][i2_alig:j2_alig],CERCLE2_aligne_g[3],label='cercle bas')
+    plt.xlabel('échelle en micromètres')
+    plt.ylabel('échelle en micromètres')
+    plt.legend()
+    plt.show()
+return
+
+#exemple d’appel de code avec inversion de la spline pour avoir le caniveau à gauche de la surépaisseur
+
+recapitulatif_Bspline_inversion("(0678-4) (Y=22,313) (modif excel).txt",50,20,30,20,14900,15150,17100,17220)
